@@ -99,7 +99,12 @@ def eland_iterator(filename):
         if len(parts) < 2:
             raise Parse_error()
         
-        yield (parts[0], sequence_from_string(parts[1]))
+	name = parts[0]
+	if not name.startswith('>'):
+	    raise Parse_error()
+	name = name[1:]
+	
+        yield (name, sequence_from_string(parts[1]))
 
 def sequence_file_iterator(filename):
     try:
