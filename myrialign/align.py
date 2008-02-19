@@ -163,24 +163,26 @@ def sequence_nucmatch(sequence): # [ nuc, position ]
         numpy.zeros(len(sequence), 'bool')
     ])
 
-def align(seq1, seq2):
+def align(seq1, seq2, n_errors):
     """ Produce an alignment (for once we have found a hit).  
         Start point is zero in both seqs.
         End point may be anywhere in seq2, must be end of seq1. """
     len1 = len(seq1)
     len2 = len(seq2)
-    scores = numpy.zeros((len1+1,len2+1),'int')
-    scores[0,:] = numpy.arange(len2+1)
-    scores[:,0] = numpy.arange(len1+1)
+    scores = numpy.empty((len1+1,len2+1),'int')
+    scores[:,:] = n_errors+1
+    #scores[0,:] = numpy.arange(len2+1)
+    #scores[:,0] = numpy.arange(len1+1)
+    scores[0,:n_errors+1] = \
+    scores[:n_errors+1,0] = numpy.arange(n_errors+1)
     
-    #match_score = 1 - sequence.EQUAL(numpy.fromstring(seq1,'uint8')[:,None],
-    #                                 numpy.fromstring(seq2,'uint8')[None,:])
+    #TODO: no need to allocate and clear entire array
     
     for i in xrange(1,len1+1):        
-        for j in xrange(1,len2+1):
-            #if seq1[i-1] == seq2[j-1]: match_score = 0
-            #else: match_score = 1
-            
+    #    for j in xrange(1,len2+1):
+        start = max(1,i-n_errors)
+        end = min(len2,i+n_errors)
+        for j in xrange(start, end+1):            
             scores[i,j] = min(
                 scores[i-1,j-1] + sequence.NOTEQUAL[seq1[i-1],seq2[j-1]],
                 scores[i-1,j] + 1,
@@ -261,7 +263,7 @@ def handle_hit(reference, ref_pos, read, read_name, n_errors, callback):
     ref_start = max(0, ref_pos - (len(read)-1) - n_errors)
     ref_scrap = reference[ref_start:ref_pos+1]
     ali_read, ali_scrap, scrap_start, ali_errors = \
-        align(read[::-1], ref_scrap[::-1])
+        align(read[::-1], ref_scrap[::-1], n_errors)
     ali_read = ali_read[::-1]
     ali_scrap = ali_scrap[::-1]
     ref_start = ref_pos+1 - scrap_start
