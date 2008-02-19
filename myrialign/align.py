@@ -392,7 +392,9 @@ def main(argv):
         print
         print 'Files can be in FASTA or ELAND format.'
         print
-        print 'Each insertion, deletions, or subsitution counts as one error.'
+        print 'Each insertion, deletions, or subsitution counts as one error. The whole read (not'
+	print 'just part of it) must align to the reference with less than the specified maximum'
+	print 'errors in order to produce a hit.'
         print
         return 1
 
