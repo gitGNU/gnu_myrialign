@@ -1,0 +1,9 @@
+
+Myrialign
+=========
+
+To install, type:
+
+    python setup.py install
+
+The "myr" script can also be used without installing.
