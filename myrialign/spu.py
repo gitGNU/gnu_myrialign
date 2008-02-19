@@ -60,11 +60,9 @@ def get(code):
         f.close()
         
         #Hmmm
-        print >> sys.stderr, '(compiling...)',
-        sys.stderr.flush()
+        print >> sys.stderr, 'Compiling helper'
         assert os.system(compile_command % locals()) == 0
         assert os.system('mv %(out_filename)s %(filename)s' % locals()) == 0
-        print >> sys.stderr
         return filename
     finally:
         fcntl.lockf(lockfile, fcntl.LOCK_UN)

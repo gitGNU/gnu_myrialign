@@ -357,27 +357,29 @@ def search_spu(reference, reads, read_names, maxerror, callback):
 # ========================================================================
 
 def child(argv):
-    if CELL_PROCESSOR:
-        search_func = search_spu
-    else:
-        search_func = search_cpu
-
-    while True:
-        try:
-            message, value = children.receive()
-        except EOFError:
-            break
+    try:
+        if CELL_PROCESSOR:
+            search_func = search_spu
+        else:
+            search_func = search_cpu
         
-        if message == 'align':
-            reads, read_names, maxerror = value
-            search_func(reference, reads, read_names, maxerror, 
-                        lambda hit: children.send(('hit',hit)) )
-            children.send(('done', len(reads)))
-        elif message == 'ref':
-            reference = value
-
-    return 0
-
+        while True:
+            try:
+                message, value = children.receive()
+            except EOFError:
+                break
+            
+            if message == 'align':
+                reads, read_names, maxerror = value
+                search_func(reference, reads, read_names, maxerror, 
+                            lambda hit: children.send(('hit',hit)) )
+                children.send(('done', len(reads)))
+            elif message == 'ref':
+                reference = value
+        
+        return 0
+    except KeyboardInterrupt:
+        return 1
 
 def main(argv):
     if len(argv) < 3:
@@ -394,18 +396,18 @@ def main(argv):
         print
         return 1
 
-    if CELL_PROCESSOR:
-        CHUNK = 2048
-    else:
-        CHUNK = 8192
-    print >> sys.stderr, 'Myralign'
+    #if CELL_PROCESSOR:
+    #    CHUNK = 2048
+    #else:
+    #    CHUNK = 8192
+    #print >> sys.stderr, 'Myralign'
     
     if CELL_PROCESSOR:
         print >> sys.stderr, 'Cell processor detected'
     else:
         print >> sys.stderr, 'Cell processor not detected'
     
-    print >> sys.stderr, 'Aligning batches of', CHUNK//2, 'reads per process,', PROCESSES, 'processes.'
+    print >> sys.stderr, 'Using', PROCESSES, 'processes'
     
     maxerror = int(argv[0])
     
@@ -444,6 +446,8 @@ def main(argv):
             while not waiting: 
                 handle_events()
         
+            print >> sys.stderr, 'Starting batch alignment of', len(read_seqs), '%d-mers'%length
+        
             child = waiting.pop()
             child.send(('align', (read_seqs, read_names, maxerror)))
             running.append(child)
@@ -457,7 +461,15 @@ def main(argv):
             buckets[length][0].append(read_name + ' rev')
             buckets[length][1].append(sequence.reverse_complement(read_seq))
             
-            if len(buckets[length][0]) >= CHUNK:
+            if CELL_PROCESSOR:
+                #Hmmm
+                chunk = 2000000 // (length*((maxerror+1)*2+5))
+                chunk -= chunk&127
+                chunk = max(chunk, 128)
+            else:
+                chunk = 8192
+            
+            if len(buckets[length][0]) >= chunk:
                 do_bucket(length)
         
         for length in list(buckets):
