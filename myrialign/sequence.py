@@ -63,19 +63,30 @@ def fasta_iterator(filename):
     f = open(filename,'rU')
     while True:
         line = f.readline()
-        
+
+        # Sequence data?        
         if line and not line.startswith('>'):
             assert cur_seq_name is not None
             cur_seq.append(line.strip())
             continue
-    
+        
+        # Ok, not sequence data
+	# Must be the start of a new sequence or end of file
+		
+	if cur_seq_name is None and cur_seq:
+	    raise Parse_error()
+	
+	if cur_seq_name is not None and not cur_seq:
+	    raise Parse_error()
+		
+	# Output current sequence, if we're not at the start of the file
         if cur_seq_name is not None:
             yield (cur_seq_name, sequence_from_string(''.join(cur_seq)) )
             cur_seq = [ ]
             
         if not line: break
         
-        cur_seq_name = line[1:].strip()
+        cur_seq_name = line[1:].strip().split()[0]
 
 def eland_iterator(filename):
     f = open(filename,'rU')
@@ -92,10 +103,10 @@ def eland_iterator(filename):
 
 def sequence_file_iterator(filename):
     try:
-        for result in eland_iterator(filename):
+        for result in fasta_iterator(filename):
             yield result
     except Parse_error:
-        for result in fasta_iterator(filename):
+        for result in eland_iterator(filename):
             yield result
 
 def sequence_files_iterator(filenames):

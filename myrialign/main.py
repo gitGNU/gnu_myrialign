@@ -24,9 +24,12 @@ def show_help():
     print
     print 'Commands:'
     print
-    print '    align - align reads to a reference'
+    print '    align    - align reads to a reference'
+    print
+    print '    textdump - generate text file comparing reads to reference' 
+    print '    artplot  - generate userplot files for Artemis'
     print 
-    print '    shred - generate simulated Illumina reads'
+    print '    shred    - generate simulated Illumina reads'
     print
     print 'Enter just "myr [command]" for help on that command'
     print 
@@ -46,9 +49,17 @@ def main(argv):
         import align
         return align.child(argv)
     
+    elif command == 'textdump':
+        import output
+	return output.textdump(argv)    
+    elif command == 'artplot':
+        import output
+	return output.artplot(argv)
+    
     elif command == 'shred':
         import shred
         shred.main(argv)
+	
     else:    
         return show_help()
 

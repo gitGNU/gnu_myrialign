@@ -382,13 +382,9 @@ def child(argv):
 def main(argv):
     if len(argv) < 3:
         print
-        print 'myr align'
+        print 'myr align <maximum errors> <reference genome file> <read file> [<read file>...]'
         print
         print 'Align short reads to a reference genome.'
-        print
-        print 'Usage:'
-        print
-        print '  myr align <maximum errors> <reference genome file> <read file> [<read file>...]'
         print
         print 'Files can be in FASTA or ELAND format.'
         print
