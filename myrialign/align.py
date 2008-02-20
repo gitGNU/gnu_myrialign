@@ -465,7 +465,7 @@ def main(argv):
             
             if CELL_PROCESSOR:
                 #Hmmm
-                chunk = 2000000 // (length*((maxerror+1)*2+5))
+                chunk = 1800000 // (length*((maxerror+1)*2+5))
                 chunk -= chunk&127
                 chunk = max(chunk, 128)
             else:

@@ -199,7 +199,7 @@ def send(object, file=sys.stdout, on_error=default_write_error):
 
 def receive(file=sys.stdin):
     length_pack = read(8, file)
-    if len(length_pack) < 8: 
+    if len(length_pack) < 8:
         raise EOFError()
     length = struct.unpack('<q', length_pack)[0]
     data = read(length, file)
