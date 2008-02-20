@@ -437,11 +437,25 @@ def main(argv):
         # Collect reads of the same length,
         # and do them in batches
         buckets = { } # length -> [ [name], [seq] ]
-        def do_bucket(length, chunk):
+        def do_bucket(length, only_if_full):
+            if CELL_PROCESSOR:
+                #Hmmm
+                chunk = 1800000 // (length*((maxerror+1)*2+5))
+                chunk -= chunk&127
+                chunk = max(chunk, 128)
+            else:
+                chunk = 8192
+            
+            if only_if_full and len(buckets[length][0]) < chunk:
+                return
+            
             read_names = buckets[length][0][:chunk]
             del buckets[length][0][:chunk]
             read_seqs = buckets[length][1][:chunk]
             del buckets[length][1][:chunk]
+            
+            if not buckets[length][0]:
+                del buckets[length]
         
             while not waiting: 
                 handle_events()
@@ -461,19 +475,11 @@ def main(argv):
             buckets[length][0].append(read_name + ' rev')
             buckets[length][1].append(sequence.reverse_complement(read_seq))
             
-            if CELL_PROCESSOR:
-                #Hmmm
-                chunk = 1800000 // (length*((maxerror+1)*2+5))
-                chunk -= chunk&127
-                chunk = max(chunk, 128)
-            else:
-                chunk = 8192
-            
-            if len(buckets[length][0]) >= chunk:
-                do_bucket(length, chunk)
+            do_bucket(length, True)
         
-        for length in list(buckets):
-            do_bucket(length)
+        while buckets:
+            for length in list(buckets):
+                do_bucket(length, False)
         
         while running: 
             handle_events()
