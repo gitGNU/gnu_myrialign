@@ -19,7 +19,7 @@
 #
 
 """
-     This module contains a routine to compile a C programs for Cell SPU,
+     This module contains a routine to compile C programs for the Cell SPU,
      and cache the result.
      
      It also contains SPU versions of routines found in other files in this
@@ -73,6 +73,7 @@ matcher_defines = r"""
 #define n_positions %(n_positions)d
 #define n_errors %(n_errors)d
 #define n_vecs %(n_vecs)d
+#define indel_cost %(indel_cost)d
 """
 
 matcher_body = r"""
@@ -163,17 +164,19 @@ static void observe(unsigned char nuc) {
 
 //              # Deletion in read
 //              matchout[i,i:] |= matchin[i-1,i:]
-                matchout[AT(i,j,k)] = spu_or(
-                    matchout[AT(i,j,k)],
-                    matchin[AT(i-1,j,k)]
-                );
+                if (i >= indel_cost)
+                    matchout[AT(i,j,k)] = spu_or(
+                        matchout[AT(i,j,k)],
+                        matchin[AT(i-indel_cost,j,k)]
+                    );
         
 //              # Deletion in reference
 //              matchout[i,i:] |= matchout[i-1,i-1:-1]
-                matchout[AT(i,j,k)] = spu_or(
-                    matchout[AT(i,j,k)],
-                    matchout[AT(i-1,j-1,k)]
-                );
+                if (i >= indel_cost)
+                    matchout[AT(i,j,k)] = spu_or(
+                        matchout[AT(i,j,k)],
+                        matchout[AT(i-indel_cost,j-1,k)]
+                    );
             }
     }
     
@@ -243,7 +246,7 @@ int main() {
 }
 """
 
-def get_matcher(n_errors,n_positions,n_vecs):
+def get_matcher(n_errors,n_positions,n_vecs,indel_cost):
     return get(matcher_defines % locals() + matcher_body)
 
 #print get_matcher(4,5,6)

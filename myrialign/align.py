@@ -125,34 +125,6 @@ def expand(array):
 # ========================================================================
 # ========================================================================
 
-#_complement = string.maketrans('ATGC','TACG')
-#def reverse_complement(seq):
-#    return string.translate(seq,_complement)[::-1]
-#
-#_nuc_trans = string.maketrans('ACGT',chr(0)+chr(1)+chr(2)+chr(3))
-#def sequence_nucs(sequence):
-#    return numpy.fromstring(
-#        string.translate(sequence, _nuc_trans), 'uint8')
-#    #sequence = numpy.fromstring(sequence.upper(), 'uint8')
-#    #result = numpy.zeros(len(sequence), 'uint8')
-#    #result[sequence == ord('A')] = 0
-#    #result[sequence == ord('C')] = 1
-#    #result[sequence == ord('G')] = 2
-#    #result[sequence == ord('T')] = 3
-#    #return result
-#
-#def sequence_nuc_str(sequence):
-#    return string.translate(sequence, _nuc_trans)
-
-#def sequence_nucmatch(sequence): # [ nuc, position ]
-#    sequence = numpy.fromstring(sequence.upper(), 'uint8')
-#    return numpy.array([
-#        sequence == ord('A'),
-#        sequence == ord('C'),
-#        sequence == ord('G'),
-#        sequence == ord('T'),
-#    ])
-
 def sequence_nucmatch(sequence): # [ nuc, position ]
     #TODO: handle Ns with greater memory efficiency
     return numpy.array([
@@ -163,33 +135,39 @@ def sequence_nucmatch(sequence): # [ nuc, position ]
         numpy.zeros(len(sequence), 'bool')
     ])
 
-def align(seq1, seq2, n_errors):
+def align(seq1, seq2, n_errors, indel_cost):
     """ Produce an alignment (for once we have found a hit).  
         Start point is zero in both seqs.
         End point may be anywhere in seq2, must be end of seq1. """
+    radius = n_errors // indel_cost
+    
     len1 = len(seq1)
     len2 = len(seq2)
     scores = numpy.empty((len1+1,len2+1),'int')
-    scores[:,:] = n_errors+1
+    #scores[:,:] = n_errors+1
     #scores[0,:] = numpy.arange(len2+1)
     #scores[:,0] = numpy.arange(len1+1)
-    scores[0,:n_errors+1] = \
-    scores[:n_errors+1,0] = numpy.arange(n_errors+1)
+    scores[0,:radius+1] = \
+    scores[:radius+1,0] = numpy.arange(radius+1) * indel_cost
     
-    #TODO: no need to allocate and clear entire array
+    #TODO: no need to allocate entire array
     
     for i in xrange(1,len1+1):        
     #    for j in xrange(1,len2+1):
-        start = max(1,i-n_errors)
-        end = min(len2,i+n_errors)
-        for j in xrange(start, end+1):            
+        left = max(1,i-radius)
+        right = min(len2,i+radius)
+        scores[i,left-1] = n_errors+1
+        scores[i-1,right] = n_errors+1
+        for j in xrange(left,right+1):            
             scores[i,j] = min(
                 scores[i-1,j-1] + sequence.NOTEQUAL[seq1[i-1],seq2[j-1]],
-                scores[i-1,j] + 1,
-                scores[i,j-1] + 1
+                scores[i-1,j] + indel_cost,
+                scores[i,j-1] + indel_cost
             )
     
-    end2 = numpy.argmin(scores[len1,:])
+    left = max(1,len1-radius)
+    right = min(len2,len1+radius)    
+    end2 = numpy.argmin(scores[len1,left:right+1])+left
     
     str_seq1 = sequence.string_from_sequence(seq1)
     str_seq2 = sequence.string_from_sequence(seq2)
@@ -228,6 +206,11 @@ def align(seq1, seq2, n_errors):
     return ''.join(ali1[::-1]), ''.join(ali2[::-1]), end2, scores[len1,end2]
 
 
+#print align(sequence.sequence_from_string('ACTGCTG'),
+#            sequence.sequence_from_string('ACTGACTG'),
+#            1,3)
+#sys.exit(0)
+
 # ========================================================================
 # ========================================================================
 # ========================================================================
@@ -239,7 +222,7 @@ def align(seq1, seq2, n_errors):
 # ========================================================================
 # ========================================================================
 
-def observe(matchin,matchout, nucmatches):
+def observe(matchin,matchout, nucmatches, indel_cost):
     n_errors, n_positions  = matchin.shape[:2]
     
     matchout[0,:] = nucmatches[:]
@@ -253,17 +236,19 @@ def observe(matchin,matchout, nucmatches):
         matchout[i,i:] |= matchin[i-1,i-1:-1]        
 
         # Deletion in read
-        matchout[i,i:] |= matchin[i-1,i:]
+        if i >= indel_cost:
+            matchout[i,i:] |= matchin[i-indel_cost,i:]
         
         # Deletion in reference
-        matchout[i,i:] |= matchout[i-1,i-1:-1]
+        if i >= indel_cost:
+            matchout[i,i:] |= matchout[i-indel_cost,i-1:-1]
 
 
-def handle_hit(reference, ref_pos, read, read_name, n_errors, callback):
+def handle_hit(reference, ref_pos, read, read_name, n_errors, indel_cost, callback):
     ref_start = max(0, ref_pos - (len(read)-1) - n_errors)
     ref_scrap = reference[ref_start:ref_pos+1]
     ali_read, ali_scrap, scrap_start, ali_errors = \
-        align(read[::-1], ref_scrap[::-1], n_errors)
+        align(read[::-1], ref_scrap[::-1], n_errors, indel_cost)
     ali_read = ali_read[::-1]
     ali_scrap = ali_scrap[::-1]
     ref_start = ref_pos+1 - scrap_start
@@ -273,7 +258,7 @@ def handle_hit(reference, ref_pos, read, read_name, n_errors, callback):
     callback('%s %d %d..%d %s %s' % (read_name, n_errors, ref_start+1, ref_pos, ali_read, ali_scrap))
     
 
-def search_cpu(reference, reads, read_names, maxerror, callback):
+def search_cpu(reference, reads, read_names, maxerror, indel_cost, callback):
     # Reads *must* all be the same length
     readlen = len(reads[0])
 
@@ -289,7 +274,7 @@ def search_cpu(reference, reads, read_names, maxerror, callback):
     match_out = match_in.copy()
     
     for ref_pos, nuc in enumerate(reference):
-        observe(match_in,match_out, nucmatch[nuc])
+        observe(match_in,match_out, nucmatch[nuc], indel_cost)
     
         hits = match_out[maxerror,readlen-1]
         if numpy.any(hits):
@@ -311,12 +296,12 @@ def search_cpu(reference, reads, read_names, maxerror, callback):
                         if n_errors and match_out[n_errors-1,readlen-2,i] & BIT[j]:
                             continue
 
-                        handle_hit(reference, ref_pos, reads[read_no], read_names[read_no], n_errors, callback)
+                        handle_hit(reference, ref_pos, reads[read_no], read_names[read_no], n_errors, indel_cost, callback)
 
         match_out, match_in = match_in, match_out
 
 
-def search_spu(reference, reads, read_names, maxerror, callback):
+def search_spu(reference, reads, read_names, maxerror, indel_cost, callback):
     # Reads *must* all be the same length
     readlen = len(reads[0])
     
@@ -326,7 +311,7 @@ def search_spu(reference, reads, read_names, maxerror, callback):
     nucmatch = collapse(nucmatch, 128)
     n_vecs = nucmatch.shape[2] * BITS // 128
 
-    spu_filename = spu.get_matcher(maxerror+1,readlen,n_vecs)
+    spu_filename = spu.get_matcher(maxerror+1,readlen,n_vecs,indel_cost)
 
     #child_stdin, child_stdout = os.popen2('elfspe %s' % spu_filename); #Hmmm
     child = children.Child(['elfspe', spu_filename])
@@ -342,7 +327,7 @@ def search_spu(reference, reads, read_names, maxerror, callback):
         if not hit: break
         
         hit_ref_pos, hit_read_no, hit_n_error = struct.unpack('lll', hit)
-        handle_hit(reference, hit_ref_pos, reads[hit_read_no], read_names[hit_read_no], hit_n_error, callback)
+        handle_hit(reference, hit_ref_pos, reads[hit_read_no], read_names[hit_read_no], hit_n_error, indel_cost, callback)
     
 
 
@@ -372,8 +357,8 @@ def child(argv):
                 break
             
             if message == 'align':
-                reads, read_names, maxerror = value
-                search_func(reference, reads, read_names, maxerror, 
+                reads, read_names, maxerror, indel_cost = value
+                search_func(reference, reads, read_names, maxerror, indel_cost, 
                             lambda hit: children.send(('hit',hit)) )
                 children.send(('done', len(reads)))
             elif message == 'ref':
@@ -384,17 +369,22 @@ def child(argv):
         return 1
 
 def main(argv):
-    if len(argv) < 3:
+    if len(argv) < 4:
         print
-        print 'myr align <maximum errors> <reference genome file> <read file> [<read file>...]'
+        print 'myr align <max error> <indel cost> <reference.fna> <reads.fna> [<reads.fna>...]'
         print
         print 'Align short reads to a reference genome.'
         print
         print 'Files can be in FASTA or ELAND format.'
         print
-        print 'Each insertion, deletions, or subsitution counts as one error. The whole read (not'
-	print 'just part of it) must align to the reference with less than the specified maximum'
-	print 'errors in order to produce a hit.'
+        print 'Each subsitution counts as one error. The cost of an indel can be specified,'
+        print 'but must be an integer. The whole read (not just part of it) must align to '
+        print 'the reference with less than the specified maximum errors in order to'
+        print 'produce a hit.'
+        print
+        print 'For Illumina reads, we suggest (on the basis of very little experience):'
+        print
+        print '    myr align 5 2 reference.fna reads.fna'
         print
         return 1
 
@@ -412,6 +402,9 @@ def main(argv):
     print >> sys.stderr, 'Using', PROCESSES, 'processes'
     
     maxerror = int(argv[0])
+    assert maxerror >= 0
+    indel_cost = int(argv[1])
+    assert indel_cost >= 1
     
     waiting = [ children.Self_child() for i in xrange(PROCESSES) ]
     running = [ ]
@@ -432,8 +425,11 @@ def main(argv):
             else:
                 print value
     
-    for ref_name, ref_seq in sequence.sequence_file_iterator(argv[1]):
-        print '#', ref_name
+    print '#Max errors:', maxerror
+    print '#Indel cost:', indel_cost
+    
+    for ref_name, ref_seq in sequence.sequence_file_iterator(argv[2]):
+        print '#Reference:', ref_name
         
         for child in waiting:
             child.send(('ref', ref_seq))
@@ -441,9 +437,11 @@ def main(argv):
         # Collect reads of the same length,
         # and do them in batches
         buckets = { } # length -> [ [name], [seq] ]
-        def do_bucket(length):
-            read_names, read_seqs = buckets[length]
-            del buckets[length]
+        def do_bucket(length, chunk):
+            read_names = buckets[length][0][:chunk]
+            del buckets[length][0][:chunk]
+            read_seqs = buckets[length][1][:chunk]
+            del buckets[length][1][:chunk]
         
             while not waiting: 
                 handle_events()
@@ -451,10 +449,10 @@ def main(argv):
             print >> sys.stderr, 'Starting batch alignment of', len(read_seqs), '%d-mers'%length
         
             child = waiting.pop()
-            child.send(('align', (read_seqs, read_names, maxerror)))
+            child.send(('align', (read_seqs, read_names, maxerror, indel_cost)))
             running.append(child)
         
-        for read_name, read_seq in sequence.sequence_files_iterator(argv[2:]):
+        for read_name, read_seq in sequence.sequence_files_iterator(argv[3:]):
             length = len(read_seq)
             if length not in buckets:
                 buckets[length] = ( [], [] )
@@ -472,7 +470,7 @@ def main(argv):
                 chunk = 8192
             
             if len(buckets[length][0]) >= chunk:
-                do_bucket(length)
+                do_bucket(length, chunk)
         
         for length in list(buckets):
             do_bucket(length)
