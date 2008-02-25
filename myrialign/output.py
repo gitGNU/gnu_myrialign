@@ -180,7 +180,7 @@ def artplot(argv):
 	    pos = hit.start
 	    good_start = hit.start + 5
 	    good_end = hit.end - 5 
-	    for i in xrange(len(hit['read_ali'])):
+	    for i in xrange(len(hit.read_ali)):
 		a = hit.read_ali[i]
 		b = hit.ref_ali[i]
 
@@ -254,8 +254,8 @@ def textdump(argv):
 
     lanes = [ ]
     def find_lane():
-        for start in xrange(2):
-            for i in xrange(start,len(lanes),2):
+        for start in (0,4,2,6,1,5,3,7):
+            for i in xrange(start,len(lanes),8):
 	        if lanes[i] is None: 
 	            return i
 	lanes.append(None)
