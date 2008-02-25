@@ -370,30 +370,24 @@ def child(argv):
 
 def main(argv):
     if len(argv) < 4:
-        print
-        print 'myr align <max error> <indel cost> <reference.fna> <reads.fna> [<reads.fna>...]'
-        print
-        print 'Align short reads to a reference genome.'
-        print
-        print 'Files can be in FASTA or ELAND format.'
-        print
-        print 'Each subsitution counts as one error. The cost of an indel can be specified,'
-        print 'but must be an integer. The whole read (not just part of it) must align to '
-        print 'the reference with less than the specified maximum errors in order to'
-        print 'produce a hit.'
-        print
-        print 'For Illumina reads, we suggest (on the basis of very little experience):'
-        print
-        print '    myr align 5 2 reference.fna reads.fna'
-        print
+        print >> sys.stderr, ''
+        print >> sys.stderr, 'myr align <max error> <indel cost> <reference.fna> <reads.fna> [<reads.fna>...]'
+        print >> sys.stderr, ''
+        print >> sys.stderr, 'Align short reads to a reference genome.'
+        print >> sys.stderr, ''
+        print >> sys.stderr, 'Files can be in FASTA or ELAND format.'
+        print >> sys.stderr, ''
+        print >> sys.stderr, 'Each subsitution counts as one error. The cost of an indel can be specified,'
+        print >> sys.stderr, 'but must be an integer. The whole read (not just part of it) must align to '
+        print >> sys.stderr, 'the reference with less than the specified maximum errors in order to'
+        print >> sys.stderr, 'produce a hit.'
+        print >> sys.stderr, ''
+        print >> sys.stderr, 'For Illumina reads, we suggest (on the basis of very little experience):'
+        print >> sys.stderr, ''
+        print >> sys.stderr, '    myr align 5 2 reference.fna reads.fna'
+        print >> sys.stderr, ''
         return 1
 
-    #if CELL_PROCESSOR:
-    #    CHUNK = 2048
-    #else:
-    #    CHUNK = 8192
-    #print >> sys.stderr, 'Myralign'
-    
     if CELL_PROCESSOR:
         print >> sys.stderr, 'Cell processor detected'
     else:
