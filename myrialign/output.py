@@ -108,41 +108,42 @@ def read_files(argv):
     clip_start, argv = get_option_value(argv, '-s', int, 0)
     clip_end, argv = get_option_value(argv, '-e', int, 0)
 
-    if len(argv) != 2:
-        raise Bad_option('Expected two filenames, a reference genome and output from myr align')
+    if len(argv) < 2:
+        raise Bad_option('Expected at least two filenames, a reference genome and output from myr align')
 
     reference = sequence.sequence_file_iterator(argv[0]).next()[1] 
 
     read_hits = { }
 
     nth = 0
-    for line in open(argv[1],'rb'):
-        if not line.endswith('\n'): continue
-	if line.startswith('#'): continue
-	
-	hit = Hit()
-	hit.name, hit.direction, hit.n_errors, span, hit.read_ali, hit.ref_ali = line.rstrip().split()
-	start, end = span.split('..')
-	hit.start = int(start)-1
-	hit.end = int(end)
-	
-	if hit.direction == 'fwd':
-	    hit.read_ali, hit.ref_ali, clipped_start, clipped_end = clip_alignment(hit.read_ali, hit.ref_ali, clip_start, clip_end)
-	elif hit.direction == 'rev':
-	    hit.read_ali, hit.ref_ali, clipped_start, clipped_end = clip_alignment(hit.read_ali, hit.ref_ali, clip_end, clip_start)
-	else:
-	    raise Error('Bad direction')
-	hit.start += clipped_start
-	hit.end -= clipped_end
+    for filename in argv[1:]:
+	for line in open(filename,'rb'):
+            if not line.endswith('\n'): continue
+	    if line.startswith('#'): continue
 
-	if hit.name not in read_hits: 
-            read_hits[hit.name] = [ ]
-	read_hits[hit.name].append(hit) 
+	    hit = Hit()
+	    hit.name, hit.direction, hit.n_errors, span, hit.read_ali, hit.ref_ali = line.rstrip().split()
+	    start, end = span.split('..')
+	    hit.start = int(start)-1
+	    hit.end = int(end)
 
-	nth += 1
-	if nth % 1000 == 0:
-            sys.stderr.write('Loading hits: %d            \r' % nth)
-	    sys.stderr.flush()
+	    if hit.direction == 'fwd':
+		hit.read_ali, hit.ref_ali, clipped_start, clipped_end = clip_alignment(hit.read_ali, hit.ref_ali, clip_start, clip_end)
+	    elif hit.direction == 'rev':
+		hit.read_ali, hit.ref_ali, clipped_start, clipped_end = clip_alignment(hit.read_ali, hit.ref_ali, clip_end, clip_start)
+	    else:
+		raise Error('Bad direction')
+	    hit.start += clipped_start
+	    hit.end -= clipped_end
+
+	    if hit.name not in read_hits: 
+        	read_hits[hit.name] = [ ]
+	    read_hits[hit.name].append(hit) 
+
+	    nth += 1
+	    if nth % 1000 == 0:
+        	sys.stderr.write('Loading hits: %d            \r' % nth)
+		sys.stderr.flush()
     
     return reference, read_hits
 
@@ -152,7 +153,7 @@ def artplot(argv):
         reference, read_hits = read_files(argv)
     except Bad_option, error:
         print >> sys.stderr, ''
-	print >> sys.stderr, 'myr artplot [options] <reference genome> <myr align output>'
+	print >> sys.stderr, 'myr artplot [options] <reference genome> <myr align output> [<myr align output>...]'
 	print >> sys.stderr, ''
 	print >> sys.stderr, 'Options:'
 	print >> sys.stderr, ''
@@ -230,7 +231,7 @@ def textdump(argv):
         reference, read_hits = read_files(argv)
     except Bad_option, error:
         print >> sys.stderr, ''
-	print >> sys.stderr, 'myr textdump [options] <reference genome> <myr align output>'
+	print >> sys.stderr, 'myr textdump [options] <reference genome> <myr align output> [<myr align output>...]'
 	print >> sys.stderr, ''
 	print >> sys.stderr, 'Options:'
 	print >> sys.stderr, ''
@@ -258,8 +259,8 @@ def textdump(argv):
             for i in xrange(start,len(lanes),8):
 	        if lanes[i] is None: 
 	            return i
-	lanes.append(None)
-	return len(lanes)-1
+	lanes.extend([None]*8)
+	return find_lane()
     
     pad = ' '*5
 
