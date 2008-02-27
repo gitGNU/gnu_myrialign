@@ -156,9 +156,8 @@ def align(seq1, seq2, n_errors, indel_cost):
         #for j in xrange(1,len2+1):
         left = max(1,i-radius)
         right = min(len2,i+radius)
-        assert left <= right, repr((seq1, seq2, n_errors, indel_cost))
-        if left  == i-radius: scores[i,left-1] = n_errors+1
-        if right == i+radius: scores[i-1,right] = n_errors+1
+        scores[i,left-1] = n_errors+1
+        scores[i-1,right] = n_errors+1
         for j in xrange(left,right+1):            
             scores[i,j] = min(
                 scores[i-1,j-1] + sequence.NOTEQUAL[seq1[i-1],seq2[j-1]],
@@ -290,7 +289,7 @@ class Hit_eater:
         ref_start = max(0,ref_start)        
         ref_scrap = self.reference[ref_start:ref_pos+1]       
         
-        # If before start, pad with Ns 
+        # If before start, pad with Ns (not ideal)
         if pad:
             ref_scrap = numpy.concatenate(([4]*pad, ref_scrap))
         
