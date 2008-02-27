@@ -152,7 +152,8 @@ static void observe(unsigned char nuc) {
                         matchin[AT(i,j-1,k)]
                     );
                 }
-
+                
+                
 //        for(j=i;j<n_positions;j++)
 //            for(k=0;k<n_vecs;k++) {
 //              #Mismatch
@@ -183,10 +184,10 @@ static void observe(unsigned char nuc) {
     // Any hits?
     for(k=0;k<n_vecs;k++) 
         for(l=0;l<2;l++) {
-            unsigned long a = spu_extract(matchout[AT(n_errors-1,n_positions-1,k)], l);
+            unsigned long long a = spu_extract(matchout[AT(n_errors-1,n_positions-1,k)], l);
             if (__builtin_expect(a != 0, 0)) { // Hits are rare, don't expect them
                 for(m=0;m<64;m++) {
-                    unsigned long mask = 1LU<<(63-m); //Big endian 
+                    unsigned long long mask = 1LLU<<(63-m); //Big endian 
                     if (a & mask) { 
                         //fprintf(stderr, "Hit found %d %d\n", position, k*128+l*64+m);
                         for(i=0;
@@ -195,14 +196,14 @@ static void observe(unsigned char nuc) {
                             i++);
                             
                         //Superior prior match
-                        if (i &&
-                            (spu_extract(matchin[AT(i-1,n_positions-1,k)], l)&mask) )
-                           continue;
+                        //if (i &&
+                        //    (spu_extract(matchin[AT(i-1,n_positions-1,k)], l)&mask) )
+                        //   continue;
 
                         //Equivalent future match
-                        if (i &&
-                            (spu_extract(matchout[AT(i-1,n_positions-2,k)], l)&mask) )
-                           continue;
+                        //if (i &&
+                        //    (spu_extract(matchout[AT(i-1,n_positions-2,k)], l)&mask) )
+                        //   continue;
                            
                         //fprintf(stderr, "Hit found %d %d %d\n", position, k*128+l*64+m, i);
                         output(position);

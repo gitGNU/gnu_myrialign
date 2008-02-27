@@ -153,11 +153,12 @@ def align(seq1, seq2, n_errors, indel_cost):
     #TODO: no need to allocate entire array
     
     for i in xrange(1,len1+1):        
-    #    for j in xrange(1,len2+1):
+        #for j in xrange(1,len2+1):
         left = max(1,i-radius)
         right = min(len2,i+radius)
-        scores[i,left-1] = n_errors+1
-        scores[i-1,right] = n_errors+1
+        assert left <= right, repr((seq1, seq2, n_errors, indel_cost))
+        if left  == i-radius: scores[i,left-1] = n_errors+1
+        if right == i+radius: scores[i-1,right] = n_errors+1
         for j in xrange(left,right+1):            
             scores[i,j] = min(
                 scores[i-1,j-1] + sequence.NOTEQUAL[seq1[i-1],seq2[j-1]],
@@ -167,6 +168,7 @@ def align(seq1, seq2, n_errors, indel_cost):
     
     left = max(1,len1-radius)
     right = min(len2,len1+radius)    
+    #end2 = numpy.argmin(scores[len1,1:])+1
     end2 = numpy.argmin(scores[len1,left:right+1])+left
     
     str_seq1 = sequence.string_from_sequence(seq1)
@@ -244,18 +246,64 @@ def observe(matchin,matchout, nucmatches, indel_cost):
             matchout[i,i:] |= matchout[i-indel_cost,i-1:-1]
 
 
-def handle_hit(reference, ref_pos, read, read_name, n_errors, indel_cost, callback):
-    ref_start = max(0, ref_pos - (len(read)-1) - n_errors)
-    ref_scrap = reference[ref_start:ref_pos+1]
-    ali_read, ali_scrap, scrap_start, ali_errors = \
-        align(read[::-1], ref_scrap[::-1], n_errors, indel_cost)
-    ali_read = ali_read[::-1]
-    ali_scrap = ali_scrap[::-1]
-    ref_start = ref_pos+1 - scrap_start
-    
-    assert n_errors == ali_errors
 
-    callback('%s %d %d..%d %s %s' % (read_name, n_errors, ref_start+1, ref_pos, ali_read, ali_scrap))
+def dominates(hit1, hit2):
+    return hit1[2] == hit2[2] and abs(hit2[0]-hit1[0]) <= (hit2[3]-hit1[3])
+
+class Hit_eater:
+    def __init__(self, reference, indel_cost, callback):
+        self.reference = reference
+        self.callback = callback
+        self.indel_cost = indel_cost
+        
+        self.hits = [ ] #(0=ref_pos,1=read,2=read_name,3=n_errors)
+
+    def register_hit(self, *hit):
+        for existing_hit in self.hits:
+            if dominates(existing_hit, hit):
+                return
+        
+        i = 0
+        while i < len(self.hits):
+            if dominates(hit, self.hits[i]):
+                del self.hits[i]
+            else:
+                i += 1
+        
+        self.hits.append(hit)
+            
+    def advance(self, pos):
+        i = 0
+        while i < len(self.hits):
+            hit = self.hits[i]
+            if pos is None or hit[0]+hit[3] < pos:
+                self.handle_hit(*hit)
+                del self.hits[i]
+            else:
+                i += 1
+
+    def handle_hit(self, ref_pos, read, read_name, n_errors):
+        #TODO: handle ends of the reference more nicely
+    
+        ref_start = ref_pos - (len(read)-1) - n_errors//self.indel_cost
+        pad = -min(0,ref_start)
+        ref_start = max(0,ref_start)        
+        ref_scrap = self.reference[ref_start:ref_pos+1]       
+        
+        # If before start, pad with Ns 
+        if pad:
+            ref_scrap = numpy.concatenate(([4]*pad, ref_scrap))
+        
+        ali_read, ali_scrap, scrap_start, ali_errors = \
+            align(read[::-1], ref_scrap[::-1], n_errors, self.indel_cost)
+        ali_read = ali_read[::-1]
+        ali_scrap = ali_scrap[::-1]
+        ref_start = ref_pos+1 - scrap_start
+        
+        assert n_errors == ali_errors, '%d (expected) != %d (got) %s vs %s' % (n_errors, ali_errors, ref_scrap, read)
+    
+        self.callback('%s %d %d..%d %s %s' % (read_name, n_errors, ref_start+1, ref_pos, ali_read, ali_scrap))
+
     
 
 def search_cpu(reference, reads, read_names, maxerror, indel_cost, callback):
@@ -273,6 +321,8 @@ def search_cpu(reference, reads, read_names, maxerror, indel_cost, callback):
     match_in = collapse(match_in)
     match_out = match_in.copy()
     
+    hit_eater = Hit_eater(reference, indel_cost, callback)
+    
     for ref_pos, nuc in enumerate(reference):
         observe(match_in,match_out, nucmatch[nuc], indel_cost)
     
@@ -288,17 +338,21 @@ def search_cpu(reference, reads, read_names, maxerror, indel_cost, callback):
                             if match_out[n_errors,readlen-1,i] & BIT[j]:
                                 break
 
-                        #Superior prior match?
-                        if n_errors and match_in[n_errors-1,readlen-1,i] & BIT[j]:
-                            continue
+                        ##Superior prior match?
+                        #if n_errors and match_in[n_errors-1,readlen-1,i] & BIT[j]:
+                        #    continue
                         
-                        #Equivalent future match?
-                        if n_errors and match_out[n_errors-1,readlen-2,i] & BIT[j]:
-                            continue
+                        ##Equivalent future match?
+                        #if n_errors and match_out[n_errors-1,readlen-2,i] & BIT[j]:
+                        #    continue
 
-                        handle_hit(reference, ref_pos, reads[read_no], read_names[read_no], n_errors, indel_cost, callback)
+                        #handle_hit(reference, ref_pos, reads[read_no], read_names[read_no], n_errors, indel_cost, callback)
+                        hit_eater.register_hit(ref_pos, reads[read_no], read_names[read_no], n_errors)
 
         match_out, match_in = match_in, match_out
+        hit_eater.advance(ref_pos)
+    
+    hit_eater.advance(None) #Flush
 
 
 def search_spu(reference, reads, read_names, maxerror, indel_cost, callback):
@@ -320,6 +374,8 @@ def search_spu(reference, reads, read_names, maxerror, indel_cost, callback):
     child.write(reference.tostring())
     child.close_stdin()
     
+    hit_eater = Hit_eater(reference, indel_cost, callback)
+    
     while True:
         children.wait([child])
         
@@ -327,9 +383,10 @@ def search_spu(reference, reads, read_names, maxerror, indel_cost, callback):
         if not hit: break
         
         hit_ref_pos, hit_read_no, hit_n_error = struct.unpack('lll', hit)
-        handle_hit(reference, hit_ref_pos, reads[hit_read_no], read_names[hit_read_no], hit_n_error, indel_cost, callback)
-    
+        hit_eater.register_hit(hit_ref_pos, reads[hit_read_no], read_names[hit_read_no], hit_n_error)
+        hit_eater.advance(hit_ref_pos-1)
 
+    hit_eater.advance(None) #flush
 
 
 # ========================================================================
