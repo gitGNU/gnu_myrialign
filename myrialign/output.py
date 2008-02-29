@@ -186,7 +186,7 @@ def read_files(argv):
 	    #read_hits[hit.name].append(hit) 
 
 	    nth += 1
-	    if nth % 1000 == 0:
+	    if nth % 10000 == 0:
         	sys.stderr.write('Loading hits: %d            \r' % nth)
 		sys.stderr.flush()
     
@@ -245,7 +245,7 @@ def artplot(argv):
 		    pos += 1
 
 	    nth += 1
-	    if nth % 1000 == 0:
+	    if nth % 10000 == 0:
         	sys.stderr.write('Processing: %d          \r' % nth)
 		sys.stderr.flush()
 
