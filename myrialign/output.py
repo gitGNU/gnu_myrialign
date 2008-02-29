@@ -104,6 +104,37 @@ def clip_alignment(read_ali, ref_ali, clip_start, clip_end):
     
     return read_ali, ref_ali, n_start, n_end
 
+
+class Table:
+    def __init__(self, members):
+	self.store_size = 1
+	self.length = 0
+	self.members = [ ]
+	self.indicies = { }
+        for name, dtype in members:
+	    self.members.append(name)
+	    setattr(self, name, numpy.empty(self.store_size, dtype))
+	
+    def resize(self, length):
+	self.length = length
+	self.indicies = { }
+	if length > self.store_size:	
+	    self.store_size = length*5//4
+	    for name in self.members:
+	        getattr(self, name).resize(self.store_size)
+
+    def iter_groups(self, name):
+        column = getattr(self, name)
+        order = numpy.argsort(column)
+	start = 0
+	while start < len(order):
+	    end = start + 1
+	    while end < len(order) and column[order[start]] == column[order[end]]:
+	        end += 1
+	    yield order[start:end]
+	    start = end
+	    
+
 def read_files(argv):
     clip_start, argv = get_option_value(argv, '-s', int, 0)
     clip_end, argv = get_option_value(argv, '-e', int, 0)
@@ -113,7 +144,17 @@ def read_files(argv):
 
     reference = sequence.sequence_file_iterator(argv[0]).next()[1] 
 
-    read_hits = { }
+    #read_hits = { }
+    
+    hits = Table((
+        ('name', 'object'),
+	('forward', 'bool'),
+	('read_ali', 'object'),
+	('ref_ali', 'object'),
+	('start', 'int32'),
+	('end', 'int32'),
+	('n_errors', 'int32'),
+    ))
 
     nth = 0
     for filename in argv[1:]:
@@ -121,36 +162,43 @@ def read_files(argv):
             if not line.endswith('\n'): continue
 	    if line.startswith('#'): continue
 
-	    hit = Hit()
-	    hit.name, hit.direction, hit.n_errors, span, hit.read_ali, hit.ref_ali = line.rstrip().split()
+	    #hit = Hit()
+	    #hit.name, hit.direction, hit.n_errors, span, hit.read_ali, hit.ref_ali = line.rstrip().split()
+	    i = hits.length
+	    hits.resize(i+1)
+	    hits.name[i], direction, n_errors, span, hits.read_ali[i], hits.ref_ali[i] = line.rstrip().split()
 	    start, end = span.split('..')
-	    hit.start = int(start)-1
-	    hit.end = int(end)
+	    hits.start[i] = int(start)-1
+	    hits.end[i] = int(end)
+	    hits.n_errors[i] = int(n_errors)	    
+	    hits.forward[i] = (direction == 'fwd')
 
-	    if hit.direction == 'fwd':
-		hit.read_ali, hit.ref_ali, clipped_start, clipped_end = clip_alignment(hit.read_ali, hit.ref_ali, clip_start, clip_end)
-	    elif hit.direction == 'rev':
-		hit.read_ali, hit.ref_ali, clipped_start, clipped_end = clip_alignment(hit.read_ali, hit.ref_ali, clip_end, clip_start)
-	    else:
-		raise Error('Bad direction')
-	    hit.start += clipped_start
-	    hit.end -= clipped_end
+            if clip_start or clip_end:
+	        if hits.forward[i]:
+		    hits.read_ali[i], hits.ref_ali[i], clipped_start, clipped_end = clip_alignment(hits.read_ali[i], hits.ref_ali[i], clip_start, clip_end)
+	        else:
+		    hits.read_ali[i], hits.ref_ali[i], clipped_start, clipped_end = clip_alignment(hits.read_ali[i], hits.ref_ali[i], clip_end, clip_start)
+	        hits.start[i] += clipped_start
+	        hits.end[i] -= clipped_end
 
-	    if hit.name not in read_hits: 
-        	read_hits[hit.name] = [ ]
-	    read_hits[hit.name].append(hit) 
+	    #if hits.name[i] not in read_hits: 
+        	#read_hits[hit.name] = [ ]
+	    #read_hits[hit.name].append(hit) 
 
 	    nth += 1
 	    if nth % 1000 == 0:
         	sys.stderr.write('Loading hits: %d            \r' % nth)
 		sys.stderr.flush()
     
-    return reference, read_hits
+    return reference, hits
+
+
+
 
 def artplot(argv):
     try:
         only_single, argv = get_option(argv, '-u')
-        reference, read_hits = read_files(argv)
+        reference, hits = read_files(argv)
     except Bad_option, error:
         print >> sys.stderr, ''
 	print >> sys.stderr, 'myr artplot [options] <reference genome> <myr align output> [<myr align output>...]'
@@ -170,37 +218,30 @@ def artplot(argv):
     substitutions = numpy.zeros(size, 'float64')
     
     nth = 0
-    for name in read_hits:
-	hits = read_hits[name]
+    for group in hits.iter_groups('name'):
+	if only_single and len(group) > 1: continue
 
-	if only_single and len(hits) > 1: continue
+	weight = 1.0 / len(group)
 
-	weight = 1.0 / len(hits)
-
-	for hit in hits:    
-	    pos = hit.start
-	    good_start = hit.start + 5
-	    good_end = hit.end - 5 
-	    for i in xrange(len(hit.read_ali)):
-		a = hit.read_ali[i]
-		b = hit.ref_ali[i]
-
-        	good = good_start <= pos < good_end 
+	for i in group:    
+	    pos = hits.start[i]
+	    read_ali = hits.read_ali[i]
+	    ref_ali = hits.ref_ali[i]
+	    for j in xrange(len(read_ali)):
+		a = read_ali[j]
+		b = ref_ali[j]
 
         	if a == '-':
-	            if good:
-			deletions[pos] += weight
-			coverage[pos] += weight
+		    deletions[pos] += weight
+		    coverage[pos] += weight
 		    pos += 1
 		elif b == '-':
-	            if good:
-			insertions[pos] += weight
+		    insertions[pos] += weight
 		else:
-	            if good:
-			if a != b:
-	                    substitutions[pos] += weight
+		    if a != b:
+	                substitutions[pos] += weight
 
-			coverage[pos] += weight
+	            coverage[pos] += weight
 		    pos += 1
 
 	    nth += 1
@@ -228,7 +269,7 @@ def artplot(argv):
 def textdump(argv):
     try:
         only_single, argv = get_option(argv, '-u')
-        reference, read_hits = read_files(argv)
+        reference, hits = read_files(argv)
     except Bad_option, error:
         print >> sys.stderr, ''
 	print >> sys.stderr, 'myr textdump [options] <reference genome> <myr align output> [<myr align output>...]'
@@ -243,15 +284,13 @@ def textdump(argv):
     size = len(reference)
 
     todo = { }
-    for name in read_hits:
-	hits = read_hits[name]
-
-        if only_single and len(hits) > 1: continue	
+    for group in hits.iter_groups('name'):
+        if only_single and len(group) > 1: continue	
 	
-	for hit in hits:
-	    if hit.start not in todo: 
-	        todo[hit.start] = []
-	    todo[hit.start].append(hit)
+	for i in group:
+	    if hits.start[i] not in todo: 
+	        todo[hits.start[i]] = []
+	    todo[hits.start[i]].append(i)
 
     lanes = [ ]
     def find_lane():
@@ -270,9 +309,9 @@ def textdump(argv):
 	    del lanes[-1]
     
         if pos in todo:
-	    for hit in todo[pos]:
+	    for i in todo[pos]:
 	        lane_no = find_lane()
-		lanes[lane_no] = [hit.ref_ali+pad,hit.read_ali+pad]
+		lanes[lane_no] = [hits.ref_ali[i]+pad,hits.read_ali[i]+pad]
 
         to_show = [ ref_nuc ]
 	
