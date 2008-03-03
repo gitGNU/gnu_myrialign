@@ -216,6 +216,8 @@ def artplot(argv):
     insertions = numpy.zeros(size, 'float64')
     deletions = numpy.zeros(size, 'float64')
     substitutions = numpy.zeros(size, 'float64')
+    base_counts = numpy.zeros((size,5), 'float64')
+    base_map = {'A':0,'T':1,'C':2,'G':3,'N':4}
     
     nth = 0
     for group in hits.iter_groups('name'):
@@ -242,6 +244,7 @@ def artplot(argv):
 	                substitutions[pos] += weight
 
 	            coverage[pos] += weight
+		    base_counts[pos, base_map[a]] += weight
 		    pos += 1
 
 	    nth += 1
@@ -264,6 +267,17 @@ def artplot(argv):
     save(prefix+'insertions.txt', insertions)
     save(prefix+'deletions.txt', deletions)
     save(prefix+'substitutions.txt', substitutions)
+    
+    base_counts = base_counts[:,:4]
+    base_total = numpy.sum(base_counts, 1)
+    surprise = numpy.zeros((size,4),'float64')
+    for i in xrange(4):
+        good = base_counts[:,i] > 0
+        surprise[good,i] = numpy.log( base_counts[good,i] / base_total[good] ) / numpy.log(0.5)
+    entropy = numpy.zeros(size, 'float64')
+    good = base_total > 0
+    entropy[good] = numpy.sum(base_counts[good,:] * surprise[good,:], 1) / base_total[good]
+    save(prefix+'confusion.txt', entropy)
 
 
 def textdump(argv):
