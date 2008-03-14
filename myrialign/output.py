@@ -561,7 +561,7 @@ class Dag(Manymany):
             self.key_keyset.link(key, keyset)
             self.create(keyset)
         
-        return list(self.key_keyset.forward[key])[0] #Should use a manyone, really
+        return iter(self.key_keyset.forward[key]).next() #Should use a manyone, really
 	
     def get_all_keysets(self):
         return self.key_keyset.back.keys()
@@ -589,8 +589,8 @@ class Dag(Manymany):
         a = self.get_keyset(a)
         b = self.get_keyset(b)
         
-        visited = sets.Set([])
-        betweeners = sets.Set([a])
+        visited = sets.Set()
+        betweeners = sets.Set((a,))
         if self._find_betweeners(b, visited, betweeners):
             self.merge_keysets(betweeners)
         else:
@@ -678,24 +678,27 @@ class Union:
 	return list(results.values())
 
 
-FORWARD_MASK = (1<<31)
-POSITION_MASK = (1<<31)-1
+FORWARD_MASK = numpy.uint64( (1<<31) )
+POSITION_MASK = numpy.uint64( (1<<31)-1 )
+ONE_UINT64 = numpy.uint64(1)
+ZERO_UINT64 = numpy.uint64(0)
+SEQUENCE_SHIFT = numpy.uint64(32)
 
 def make_location(seq_id, is_forward, position):
-    return (long(seq_id) << 32) + (is_forward and FORWARD_MASK or 0) + position
+    return (numpy.uint64(seq_id) << SEQUENCE_SHIFT) + (is_forward and FORWARD_MASK or ZERO_UINT64) + numpy.uint64(position)
 
 def location_parts(location):
-    return (location>>32), bool(location&FORWARD_MASK), location&POSITION_MASK
+    return location>>SEQUENCE_SHIFT, bool(location&FORWARD_MASK), location&POSITION_MASK
 
 def location_sequence(location):
-    return location>>32
+    return location>>SEQUENCE_SHIFT
 
 def location_next(location):
     """ Note: no bounds checking """
     if location & FORWARD_MASK:
-        return location + 1
+        return location + ONE_UINT64
     else:
-        return location - 1
+        return location - ONE_UINT64
 
 class Sequences(Table):
     MEMBERS = (
@@ -940,7 +943,11 @@ class Browser:
 	offset_x = maxx//2-cursor_x
 	
         for y in xrange(len(contigs)):
-	    info = contigs[y].name+(' <<<',' >>>')[contigs[y].forward]
+	    info = contigs[y].name
+	    if contigs[y].forward:
+	        info += ' >>>'
+	    else:
+	        info += ' <<<'
 	    self.screen.addstr(y+offset_y,-len(info)-1+offset_x,info)
 	
 	    #item = iter(contigua[y]).next()
