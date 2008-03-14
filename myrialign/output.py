@@ -24,12 +24,14 @@
 
 """
 
-import sys, numpy, os.path
+import sys, numpy, os.path, sets
 
 import sequence
 
 class Error(Exception): pass
 class Bad_option(Error): pass
+class Not_found(Error): pass
+class Out_of_bounds(Error): pass
 
 class Hit:
     """ Structure for storing a hit. Members:
@@ -106,26 +108,67 @@ def clip_alignment(read_ali, ref_ali, clip_start, clip_end):
 
 
 class Table:
-    def __init__(self, members):
-	self.store_size = 1
+    def __init__(self):
+	self.store_size = 0
 	self.length = 0
-	self.members = [ ]
 	self.indicies = { }
-        for name, dtype in members:
-	    self.members.append(name)
+        for name, dtype in self.MEMBERS:
 	    setattr(self, name, numpy.empty(self.store_size, dtype))
 	
     def resize(self, length):
 	self.length = length
 	self.indicies = { }
-	if length > self.store_size:	
+	if length > self.store_size:
+	    old_size = self.store_size
 	    self.store_size = length*5//4
-	    for name in self.members:
-	        getattr(self, name).resize(self.store_size)
+	    for name, dtype in self.MEMBERS:
+	        column = numpy.empty(self.store_size, dtype)
+		column[:old_size] = self.__dict__[name]
+	        setattr(self,name,column)
+
+    def new_id(self):
+        result = self.length
+	self.resize(result+1)
+	return result
+
+    def you_are_dirty(self):
+        if self.indicies:
+	    self.indicies = { }
+
+    def index(self, name):
+        if name not in self.indicies:
+	    self.indicies[name] = numpy.argsort(self.__dict__[name][:self.length])
+	return self.indicies[name]
+
+    def _find(self, name, value):
+        column = self.__dict__[name]
+        order = self.index(name)
+	
+	lo = 0
+	hi = len(order)
+	while lo < hi:
+            mid = (lo+hi)//2
+            if column[order[mid]] < value: lo = mid+1
+            else: hi = mid
+
+        return column, order, lo
+
+    def find(self, name, value):
+        column, order, i = self._find(name, value)
+	if column[order[i]] != value:
+	    raise Not_found(self,name,value)
+	return order[i]
+    
+    def find_all(self, name, value):
+        column, order, i = self._find(name, value)
+	j = i
+	while j < len(order) and column[order[j]] == value: 
+	    j += 1
+	return order[i:j]
 
     def iter_groups(self, name):
-        column = getattr(self, name)
-        order = numpy.argsort(column)
+        column = self.__dict__[name]
+        order = self.index(name)
 	start = 0
 	while start < len(order):
 	    end = start + 1
@@ -133,7 +176,42 @@ class Table:
 	        end += 1
 	    yield order[start:end]
 	    start = end
-	    
+
+class Hits(Table):
+    MEMBERS = (
+        ('name', 'object'),
+	('forward', 'bool'),
+	('read_ali', 'object'),
+	('ref_ali', 'object'),
+	('start', 'int32'),
+	('end', 'int32'),
+	('n_errors', 'int32'),
+    )   
+
+
+def iter_hit_file(filename):
+    ref_name = None
+    nth = 0
+    for line in open(filename, 'rb'):
+        if line.startswith('#'):
+            if line.startswith('#Reference:'):
+	        ref_name = line.split()[1]
+	    continue
+	
+	name, direction, n_errors, span, read_ali, ref_ali = line.rstrip().split()
+	start, end = span.split('..')
+	start = int(start)-1
+	end = int(end)
+	n_errors = int(n_errors)	    
+	forward = (direction == 'fwd')
+	
+	nth += 1
+	if nth % 1000 == 0:
+            sys.stderr.write('Loading hits: %d            \r' % nth)
+	    sys.stderr.flush()
+	
+	yield ref_name, name, forward, n_errors, start, end, read_ali, ref_ali
+	
 
 def read_files(argv):
     clip_start, argv = get_option_value(argv, '-s', int, 0)
@@ -146,32 +224,35 @@ def read_files(argv):
 
     #read_hits = { }
     
-    hits = Table((
-        ('name', 'object'),
-	('forward', 'bool'),
-	('read_ali', 'object'),
-	('ref_ali', 'object'),
-	('start', 'int32'),
-	('end', 'int32'),
-	('n_errors', 'int32'),
-    ))
+    hits = Hits()
 
-    nth = 0
+    #nth = 0
     for filename in argv[1:]:
-	for line in open(filename,'rb'):
-            if not line.endswith('\n'): continue
-	    if line.startswith('#'): continue
+	#for line in open(filename,'rb'):
+        #    if not line.endswith('\n'): continue
+	#    if line.startswith('#'): continue
+	
+	for ref_name, name, forward, n_errors, start, end, read_ali, ref_ali \
+	        in iter_hit_file(filename):
 
 	    #hit = Hit()
 	    #hit.name, hit.direction, hit.n_errors, span, hit.read_ali, hit.ref_ali = line.rstrip().split()
 	    i = hits.length
 	    hits.resize(i+1)
-	    hits.name[i], direction, n_errors, span, hits.read_ali[i], hits.ref_ali[i] = line.rstrip().split()
-	    start, end = span.split('..')
-	    hits.start[i] = int(start)-1
-	    hits.end[i] = int(end)
-	    hits.n_errors[i] = int(n_errors)	    
-	    hits.forward[i] = (direction == 'fwd')
+	    #hits.name[i], direction, n_errors, span, hits.read_ali[i], hits.ref_ali[i] = line.rstrip().split()
+	    #start, end = span.split('..')
+	    #hits.start[i] = int(start)-1
+	    #hits.end[i] = int(end)
+	    #hits.n_errors[i] = int(n_errors)	    
+	    #hits.forward[i] = (direction == 'fwd')
+	    
+	    hits.name[i] = name
+	    hits.forward[i] = forward
+	    hits.n_errors[i] = n_errors
+	    hits.start[i] = start
+	    hits.end[i] = end
+	    hits.read_ali[i] = read_ali
+	    hits.ref_ali[i] = ref_ali
 
             if clip_start or clip_end:
 	        if hits.forward[i]:
@@ -185,10 +266,12 @@ def read_files(argv):
         	#read_hits[hit.name] = [ ]
 	    #read_hits[hit.name].append(hit) 
 
-	    nth += 1
-	    if nth % 10000 == 0:
-        	sys.stderr.write('Loading hits: %d            \r' % nth)
-		sys.stderr.flush()
+	    #nth += 1
+	    #if nth % 10000 == 0:
+        	#sys.stderr.write('Loading hits: %d            \r' % nth)
+		#sys.stderr.flush()
+
+    hits.you_are_dirty()
     
     return reference, hits
 
@@ -394,3 +477,466 @@ def textdump(argv):
 		print row[0], ((confusing and ' ?') or (interesting and '! ') or '  '), ''.join(row[1:])
 
     print >> sys.stderr, 'Proportion of reference with at least one hit: %.2f%%' % ( 100.0*float(total_with_a_hit)/len(reference) )
+
+
+
+
+
+# =====================================================================
+# (perhaps move somewhere else...)
+
+"""
+
+A location is <sequence id, 32 bits> <is forward?, 1 bit> <location, 31 bits>
+
+Tables:
+
+    Sequence:
+    - name (string) - urlish, eg read:blah, cds:blahblah
+    - sequence (array)
+
+    Alignment:
+    - type (string)
+    
+    Base_link
+    - location1
+    - location2
+    - alignment id
+
+"""
+
+
+
+class Manymany:
+    def __init__(self):
+        self.forward = { }
+        self.back = { }
+    
+    def create_forward(self, item):
+        if item not in self.forward: 
+            self.forward[item] = sets.Set()
+    
+    def create_back(self, item):
+        if item not in self.back:
+            self.back[item] = sets.Set()
+    
+    def create(self, item):
+        self.create_forward(item)
+        self.create_back(item)
+
+    def destroy_forward(self, item):
+        assert not self.forward[item]
+        del self.forward[item]
+
+    def destroy_back(self, item):
+        assert not self.back[item]
+        del self.back[item]
+          
+    def destroy(self, item):
+        self.destroy_forward(item)
+        self.destroy_back(item)
+    
+    def link(self, a, b):
+        self.forward[a].add(b)
+        self.back[b].add(a)
+        
+    def unlink(self, a, b):
+        self.forward[a].remove(b)
+        self.back[b].remove(a)
+        
+
+class Dag(Manymany):
+    def __init__(self):
+        Manymany.__init__(self)
+        self.key_keyset = Manymany()
+    
+    def has_key(self, key):
+        return key in self.key_keyset.forward
+    
+    def get_keyset(self, key):        
+        if key not in self.key_keyset.forward:
+            keyset = (key,)
+            self.key_keyset.create_forward(key)
+            self.key_keyset.create_back(keyset)
+            self.key_keyset.link(key, keyset)
+            self.create(keyset)
+        
+        return list(self.key_keyset.forward[key])[0] #Should use a manyone, really
+    
+    def _find_betweeners(self, keyset, visited, betweeners):
+        if keyset in betweeners:
+            return True
+            
+        if keyset in visited:
+            return False
+                    
+        visited.add(keyset)
+        
+        any = False
+        
+        for next in self.forward[keyset]:
+            any = any or self._find_betweeners(next,visited,betweeners)
+        
+        if any:
+            betweeners.add(keyset)
+            
+        return any
+    
+    def link_keys(self, a, b):
+        a = self.get_keyset(a)
+        b = self.get_keyset(b)
+        
+        visited = sets.Set([])
+        betweeners = sets.Set([a])
+        if self._find_betweeners(b, visited, betweeners):
+            print 'merge' #, betweeners
+            self.merge_keysets(betweeners)
+        else:
+            self.link(a,b)
+    
+    def merge_keys(self, a, b):
+        a = self.get_keyset(a)
+        b = self.get_keyset(b)
+	if a != b:
+            self.merge_keysets((a,b))
+        
+    def merge_keysets(self, keysets):
+        if len(keysets) <= 1:
+	    return
+	    
+        new_keyset = sum(keysets, ())
+        self.create(new_keyset)
+        self.key_keyset.create_back(new_keyset)
+        
+        for keyset in keysets:
+            for old_keyset in self.forward[keyset].copy():
+                self.unlink(keyset, old_keyset)
+                if old_keyset not in keysets:
+                    self.link(new_keyset, old_keyset)
+            for old_keyset in self.back[keyset].copy():
+                self.unlink(old_keyset, keyset)
+                if old_keyset not in keysets:
+                    self.link(old_keyset, new_keyset)
+
+            for key in keyset:
+                self.key_keyset.unlink(key, keyset)
+                self.key_keyset.link(key, new_keyset)
+            
+        for keyset in keysets:
+            self.key_keyset.destroy_back(keyset)  
+            self.destroy(keyset)
+
+    def sort(self):
+        ready = [ ]
+        counters = { }
+        for keyset in self.forward:
+            counters[keyset] = len(self.back[keyset])
+            if not counters[keyset]:
+                ready.append(keyset)
+        
+        result = [ ]   
+        while ready:
+            item = ready.pop(0) #TODO: clever ordering: furthest before cursor, nearest after cursor
+            result.append(item)
+            for keyset in self.forward[item]:
+                counters[keyset] -= 1
+                if not counters[keyset]:
+                    ready.append(keyset)
+        return result
+
+class Union:
+    def __init__(self):
+        self.parent = { }
+    
+    def create(self, item):
+        if item not in self.parent:
+	    self.parent[item] = item
+    
+    def root(self, item):
+        if self.parent[item] == item:
+	    return item
+	self.parent[item] = self.root(self.parent[item])
+	return self.parent[item]
+	
+    def merge_if_created(self, a,b):
+        if a in self.parent and b in self.parent:
+            self.parent[self.root(a)] = self.root(b)
+    
+    def sets(self):
+        results = { }
+        for item in self.parent:
+	    root = self.root(item)
+	    if root not in results:
+	        results[root] = sets.Set()
+	    results[root].add(item)
+	return list(results.values())
+
+
+FORWARD_MASK = (1<<31)
+POSITION_MASK = (1<<31)-1
+
+def make_location(seq_id, is_forward, position):
+    return (long(seq_id) << 32) + (is_forward and FORWARD_MASK or 0) + position
+
+def location_parts(location):
+    return (location>>32), bool(location&FORWARD_MASK), location&POSITION_MASK
+
+def location_sequence(location):
+    return location>>32
+
+def location_next(location):
+    """ Note: no bounds checking """
+    if location & FORWARD_MASK:
+        return location + 1
+    else:
+        return location - 1
+
+class Sequences(Table):
+    MEMBERS = (
+        ('name', 'object'),
+	('sequence', 'object'),
+    )
+
+class Alignments(Table):
+    MEMBERS = (
+        ('type', 'object'),
+    )
+
+class Base_links(Table):
+    MEMBERS = (
+        ('location1', 'uint64'),
+	('location2', 'uint64'),
+	('alignment', 'uint32'),
+    )
+
+
+
+class Browser:
+    def __init__(self):
+	import curses
+	
+        self.sequences = Sequences()
+	self.name_to_sequence = { }
+	self.alignments = Alignments()
+	self.base_links = Base_links()
+	
+	#self.screen = curses.initscr()
+	#curses.noecho()
+	
+    def location_move(self, location, offset):
+        seq, forward, pos = location_parts(location)
+        length = len(self.sequences.sequence[seq])
+	if not forward:
+	    offset = -offset
+	pos += offset
+	if not 0 <= pos < length:
+	    raise Out_of_bounds()
+	return make_location(seq,forward,pos)
+
+    def location_get(self, location):
+        seq, forward, pos = location_parts(location)
+	result = self.sequences.sequence[seq][pos]
+	if forward:
+	    return result
+	else:
+	    return sequence.COMPLEMENT[result]
+	
+    def add_sequence(self, name, sequence):
+        i = self.sequences.new_id()
+	self.sequences.name[i] = name
+	self.sequences.sequence[i] = sequence
+	self.sequences.you_are_dirty()
+	self.name_to_sequence[name] = i
+	return i
+
+    def add_alignment(self, type, 
+                      name1, fwd1, start1, ali1, 
+		      name2, fwd2, start2, ali2):
+	try:
+            seq1 = self.name_to_sequence[name1]
+	except KeyError:
+	    raise Error('Sequence "%s" referenced by an alignment has not been loaded' % name1)
+	
+	try:
+            seq2 = self.name_to_sequence[name2]
+	except KeyError:
+	    raise Error('Sequence "%s" referenced by an alignment has not been loaded' % name2)
+	
+	location1 = make_location(seq1, fwd1, start1)
+	location2 = make_location(seq2, fwd2, start2)
+	
+	ali = self.alignments.new_id()
+	self.alignments.type[ali] = type
+	
+	for i in xrange(len(ali1)):
+	    if ali1[i] != '-' and ali2[i] != '-':
+	        link = self.base_links.new_id()
+		self.base_links.location1[link] = location1
+		self.base_links.location2[link] = location2
+		self.base_links.alignment[link] = ali
+	    
+	    if ali1[i] != '-':
+	        location1 = location_next(location1)
+	    if ali2[i] != '-':
+	        location2 = location_next(location2)
+	
+	self.alignments.you_are_dirty()
+	self.base_links.you_are_dirty()
+	return ali
+
+    def load_sequences(self, filename):
+        for name, seq in sequence.sequence_file_iterator(filename):
+	    self.add_sequence(name, seq)
+
+    def load_myr_hits(self, filename):
+	for ref_name, name, forward, n_errors, start, end, read_ali, ref_ali \
+	        in iter_hit_file(filename):
+
+	    if name not in self.name_to_sequence:
+	        seq = sequence.sequence_from_string(read_ali.replace('-',''))
+		if not forward:
+		    seq = sequence.reverse_complement(seq)
+		self.add_sequence(name, seq)		
+
+	    seq = self.sequences.sequence[self.name_to_sequence[name]]
+	    
+	    if forward:
+	        read_start = 0
+	    else:
+	        read_start = len(seq)-1
+	    
+	    self.add_alignment('myr align',
+	        ref_name, True, start, ref_ali,
+		name, forward, read_start, read_ali)
+
+    def show(self, cursor, distance_cutoff):
+        distances = { cursor : 0 }
+	todo = [ cursor ]
+	def add_todo(location, distance):
+	    if distance > distance_cutoff:
+	        raise Out_of_bounds()
+	    if location in distances: 
+	        return
+	    todo.append(location)
+	    distances[location] = distance
+	
+	dag = Dag()
+	contigua = Union()
+	
+	while todo:
+	    location = todo.pop(-1)
+	    distance = distances[location]
+	    
+	    dag.get_keyset(location)
+	    
+	    contigua.create(location)
+	    
+	    #flipped_location = location ^ FORWARD_MASK
+	    #add_todo(flipped_location, distance)
+	    #dag.merge_keys(flipped_location, location)
+
+	    try:
+	        linked_location = self.location_move(location,1)
+	        contigua.merge_if_created(location, linked_location)
+	        add_todo(linked_location, distance+1)
+		dag.link_keys(location, linked_location)
+	    except Out_of_bounds: pass
+
+	    try:
+	        linked_location = self.location_move(location,-1)
+	        contigua.merge_if_created(location, linked_location)
+	        add_todo(linked_location, distance+1)
+		dag.link_keys(linked_location, location)
+	    except Out_of_bounds: pass
+	    
+	    def merge(linked_location):
+	        try:
+		    add_todo(linked_location, distance+1)
+		    dag.merge_keys(location, linked_location)
+		except Out_of_bounds: pass
+	    
+	    for i in self.base_links.find_all('location1',location):
+	        merge(self.base_links.location2[i])
+	    for i in self.base_links.find_all('location2',location):
+	        merge(self.base_links.location1[i])
+
+	    for i in self.base_links.find_all('location1',location^FORWARD_MASK):
+	        merge(self.base_links.location2[i]^FORWARD_MASK)
+	    for i in self.base_links.find_all('location2',location^FORWARD_MASK):
+	        merge(self.base_links.location1[i]^FORWARD_MASK)
+	
+	contigua = contigua.sets()
+	#print contigua
+	
+	#for contig in contigua:
+	#    item = iter(contig).next()
+	#    seq = location_sequence( item )
+	#    forward = (item & FORWARD_MASK) != 0
+	#    print self.sequences.name[seq], forward
+	
+	order = dag.sort()
+	
+	table = [ ]
+	column_width = [ ]
+	for locations in order:
+	    column = [ ]
+	    table.append(column)
+	    for contig in contigua:
+	        relevant = [ location for location in locations
+		             if location in contig ]
+		relevant.sort()
+		if relevant and not (relevant[0]&FORWARD_MASK):
+		    relevant = relevant[::-1]
+	        column.append( sequence.string_from_sequence( [ self.location_get(location)
+		                          for location in relevant ] ) )
+	    
+	    column_width.append(max([ len(item) for item in column ]))
+
+        
+        for y in xrange(len(contigua)):
+	    item = iter(contigua[y]).next()
+	    seq = location_sequence( item )
+	    forward = (item & FORWARD_MASK) != 0
+	    sys.stdout.write('% 20s %d  ' % (self.sequences.name[seq],forward))
+	    
+            for x in xrange(len(order)):
+	        item = table[x][y]
+		item += ' '*(column_width[x]-len(item))
+	        sys.stdout.write(item)
+	    sys.stdout.write('\n')
+
+    def browse(self):
+        if self.sequences.length == 0:
+	    raise Error('No sequences to browse')
+	    
+        self.cursor = make_location(0,True,300)
+	self.show(self.cursor, 50)
+
+BROWSE_USAGE = """\
+
+myr browse [sequence files] -aligns [alignment files]
+
+"""
+
+def browse(argv):
+    if not argv:
+        sys.stderr.write(BROWSE_USAGE)
+	return 1
+
+    browser = Browser()
+    
+    modes = ['-seqs', '-aligns']
+    mode = '-seqs'
+    for item in argv:
+        if item in modes:
+	    mode = item
+	elif mode == '-seqs':
+	    browser.load_sequences(item)
+	elif mode == '-aligns':
+	    browser.load_myr_hits(item)
+
+    browser.browse()
+
+    return 0
+
+

@@ -18,21 +18,33 @@
 #    along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+import sys
+
+USAGE = """\
+
+Usage: myr [command] ...
+
+Commands:
+
+
+    align    - align reads to a reference
+    
+    browse   - interactive sequence and alignment browser
+
+
+    textdump - generate text file comparing reads to reference
+
+    artplot  - generate userplot files for Artemis
+ 
+    shred    - generate simulated Illumina reads
+
+
+Enter just "myr [command]" for help on that command.
+
+"""
+
 def show_help():
-    print
-    print 'Usage: myr [command] ...'
-    print
-    print 'Commands:'
-    print
-    print '    align    - align reads to a reference'
-    print
-    print '    textdump - generate text file comparing reads to reference' 
-    print '    artplot  - generate userplot files for Artemis'
-    print 
-    print '    shred    - generate simulated Illumina reads'
-    print
-    print 'Enter just "myr [command]" for help on that command'
-    print 
+    sys.stderr.write(USAGE)
     return 1
 
 def main(argv):
@@ -55,6 +67,9 @@ def main(argv):
     elif command == 'artplot':
         import output
 	return output.artplot(argv)
+    elif command == 'browse':
+        import output
+	return output.browse(argv)
     
     elif command == 'shred':
         import shred
