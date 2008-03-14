@@ -24,7 +24,7 @@
 
 """
 
-import sys, numpy, os.path, sets
+import sys, numpy, os.path, sets, heapq
 
 import sequence
 
@@ -562,6 +562,9 @@ class Dag(Manymany):
             self.create(keyset)
         
         return list(self.key_keyset.forward[key])[0] #Should use a manyone, really
+	
+    def get_all_keysets(self):
+        return self.key_keyset.back.keys()
     
     def _find_betweeners(self, keyset, visited, betweeners):
         if keyset in betweeners:
@@ -589,16 +592,18 @@ class Dag(Manymany):
         visited = sets.Set([])
         betweeners = sets.Set([a])
         if self._find_betweeners(b, visited, betweeners):
-            print 'merge' #, betweeners
             self.merge_keysets(betweeners)
         else:
             self.link(a,b)
     
     def merge_keys(self, a, b):
-        a = self.get_keyset(a)
-        b = self.get_keyset(b)
-	if a != b:
-            self.merge_keysets((a,b))
+        #a = self.get_keyset(a)
+        #b = self.get_keyset(b)
+	#if a != b:
+        #    self.merge_keysets((a,b))
+	
+	self.link_keys(a,b)
+	self.link_keys(b,a)
         
     def merge_keysets(self, keysets):
         if len(keysets) <= 1:
@@ -629,7 +634,7 @@ class Dag(Manymany):
     def sort(self):
         ready = [ ]
         counters = { }
-        for keyset in self.forward:
+        for keyset in self.get_all_keysets():
             counters[keyset] = len(self.back[keyset])
             if not counters[keyset]:
                 ready.append(keyset)
@@ -640,6 +645,7 @@ class Dag(Manymany):
             result.append(item)
             for keyset in self.forward[item]:
                 counters[keyset] -= 1
+		assert counters[keyset] >= 0
                 if not counters[keyset]:
                     ready.append(keyset)
         return result
@@ -720,8 +726,18 @@ class Browser:
 	self.alignments = Alignments()
 	self.base_links = Base_links()
 	
-	#self.screen = curses.initscr()
-	#curses.noecho()
+	self.screen = curses.initscr()
+	curses.noecho()
+	curses.cbreak()
+	self.screen.keypad(1)
+    
+    def close(self):
+        import curses
+	
+	self.screen.keypad(0)
+	curses.nocbreak()
+	curses.echo()
+	curses.endwin()
 	
     def location_move(self, location, offset):
         seq, forward, pos = location_parts(location)
@@ -810,22 +826,23 @@ class Browser:
 		name, forward, read_start, read_ali)
 
     def show(self, cursor, distance_cutoff):
-        distances = { cursor : 0 }
-	todo = [ cursor ]
+	done = sets.Set()
+	todo = [ ]
+	heapq.heappush(todo, (0, cursor))
 	def add_todo(location, distance):
 	    if distance > distance_cutoff:
 	        raise Out_of_bounds()
-	    if location in distances: 
+	    if location in done: 
 	        return
-	    todo.append(location)
-	    distances[location] = distance
+	    heapq.heappush(todo, (distance, location))
 	
 	dag = Dag()
 	contigua = Union()
 	
 	while todo:
-	    location = todo.pop(-1)
-	    distance = distances[location]
+	    distance, location = heapq.heappop(todo)
+	    if location in done: continue
+	    done.add(location)
 	    
 	    dag.get_keyset(location)
 	    
@@ -864,8 +881,25 @@ class Browser:
 	        merge(self.base_links.location2[i]^FORWARD_MASK)
 	    for i in self.base_links.find_all('location2',location^FORWARD_MASK):
 	        merge(self.base_links.location1[i]^FORWARD_MASK)
+
+
 	
-	contigua = contigua.sets()
+	class Contig: pass
+	contigs = [ ]
+	for item in contigua.sets():
+	    sample = iter(item).next()
+	    seq = location_sequence( sample )
+	    forward = (sample & FORWARD_MASK) != 0
+	    contig = Contig()
+	    contigs.append(contig)
+	    contig.seq = seq
+	    contig.name = self.sequences.name[seq]
+	    contig.forward = forward
+	    contig.sort_key = (contig.name, not forward)
+	    contig.locations = item
+	    
+	contigs.sort(lambda a,b: cmp(a.sort_key, b.sort_key))
+		
 	#print contigua
 	
 	#for contig in contigua:
@@ -878,39 +912,110 @@ class Browser:
 	
 	table = [ ]
 	column_width = [ ]
-	for locations in order:
+	
+	for x, locations in enumerate(order):
 	    column = [ ]
 	    table.append(column)
-	    for contig in contigua:
+	    for y, contig in enumerate(contigs):
 	        relevant = [ location for location in locations
-		             if location in contig ]
+		             if location in contig.locations ]
 		relevant.sort()
 		if relevant and not (relevant[0]&FORWARD_MASK):
 		    relevant = relevant[::-1]
-	        column.append( sequence.string_from_sequence( [ self.location_get(location)
-		                          for location in relevant ] ) )
+		if self.cursor in relevant:
+		    cursor_y = y
+		    cursor_x = numpy.sum(column_width) + relevant.index(self.cursor)
+		    cursor_column = column
+	        column.append( relevant )
+		#sequence.string_from_sequence( [ self.location_get(location)
+		#                          for location in relevant ] ) )
 	    
-	    column_width.append(max([ len(item) for item in column ]))
+	    column_width.append(max([ len(item) for item in column ]) + 1)
 
-        
-        for y in xrange(len(contigua)):
-	    item = iter(contigua[y]).next()
-	    seq = location_sequence( item )
-	    forward = (item & FORWARD_MASK) != 0
-	    sys.stdout.write('% 20s %d  ' % (self.sequences.name[seq],forward))
+
+        self.screen.clear()
+	
+	maxy, maxx = self.screen.getmaxyx()
+	offset_y = maxy//2-cursor_y
+	offset_x = maxx//2-cursor_x
+	
+        for y in xrange(len(contigs)):
+	    info = contigs[y].name+(' <<<',' >>>')[contigs[y].forward]
+	    self.screen.addstr(y+offset_y,-len(info)-1+offset_x,info)
+	
+	    #item = iter(contigua[y]).next()
+	    #seq = location_sequence( item )
+	    #forward = (item & FORWARD_MASK) != 0
+	    #sys.stdout.write('% 20s %d  ' % (self.sequences.name[seq],forward))
 	    
+	    scr_x = 0
             for x in xrange(len(order)):
 	        item = table[x][y]
-		item += ' '*(column_width[x]-len(item))
-	        sys.stdout.write(item)
-	    sys.stdout.write('\n')
-
+		#item += ' '*(column_width[x]-len(item))
+	        #sys.stdout.write(item)
+		
+		string = sequence.string_from_sequence( [ self.location_get(location)
+		                                          for location in item ] )
+		
+		self.screen.addstr(y+offset_y,scr_x+offset_x,string)
+		
+		scr_x += column_width[x]
+		
+	    #sys.stdout.write('\n')
+	    
+	self.screen.move(cursor_y+offset_y,cursor_x+offset_x)
+	self.screen.refresh()
+	
+	return cursor_column, cursor_y
+	
     def browse(self):
+        import curses
+    
         if self.sequences.length == 0:
 	    raise Error('No sequences to browse')
+
+        self.cursor = make_location(0,True,0)
+	
+        cursor_column, cursor_y = self.show(self.cursor, 20)
+	while True:
+	    self.screen.nodelay(1)
+	    key = self.screen.getch()
+	    self.screen.nodelay(0)
+	
+	    if key == -1:
+	        cursor_column, cursor_y = self.show(self.cursor, 20)
+	        key = self.screen.getch()
 	    
-        self.cursor = make_location(0,True,300)
-	self.show(self.cursor, 50)
+	    if key == curses.KEY_LEFT:
+	        try:
+		    self.cursor = self.location_move(self.cursor, -1)
+		except Out_of_bounds:
+		    pass
+	    elif key == curses.KEY_RIGHT:
+	        try:
+		    self.cursor = self.location_move(self.cursor, 1)
+		except Out_of_bounds:
+		    pass
+	    elif key == curses.KEY_UP:
+	        while True:
+		    cursor_y -= 1
+		    if cursor_y < 0 or cursor_column[cursor_y]: break
+		if cursor_y >= 0: self.cursor = cursor_column[cursor_y][0]		    
+	    elif key == curses.KEY_DOWN:
+	        while True:
+		    cursor_y += 1
+		    if cursor_y >= len(cursor_column) or cursor_column[cursor_y]: break
+		if cursor_y < len(cursor_column): self.cursor = cursor_column[cursor_y][0]		    
+	    elif key == 10:
+	        self.cursor = self.cursor ^ FORWARD_MASK
+	    elif key == 27:
+	        break
+	    
+	
+        #for i in xrange(0,300,1):	    
+        #    self.cursor = make_location(0,True,i)
+	#    self.show(self.cursor, 10)
+	    #import time; time.sleep(0.1)
 
 BROWSE_USAGE = """\
 
@@ -924,18 +1029,22 @@ def browse(argv):
 	return 1
 
     browser = Browser()
+    try:
     
-    modes = ['-seqs', '-aligns']
-    mode = '-seqs'
-    for item in argv:
-        if item in modes:
-	    mode = item
-	elif mode == '-seqs':
-	    browser.load_sequences(item)
-	elif mode == '-aligns':
-	    browser.load_myr_hits(item)
+        modes = ['-seqs', '-aligns']
+        mode = '-seqs'
+        for item in argv:
+            if item in modes:
+	        mode = item
+	    elif mode == '-seqs':
+	        browser.load_sequences(item)
+	    elif mode == '-aligns':
+		browser.load_myr_hits(item)
 
-    browser.browse()
+	browser.browse()
+    
+    finally:
+        browser.close()
 
     return 0
 
