@@ -631,7 +631,11 @@ class Dag(Manymany):
             self.key_keyset.destroy_back(keyset)  
             self.destroy(keyset)
 
-    def sort(self):
+    def sort(self, priority):
+        keyset_priority = { }
+	for keyset in self.get_all_keysets():
+	    keyset_priority[keyset] = float(sum([ priority[key] for key in keyset ])) / len(keyset)
+    
         ready = [ ]
         counters = { }
         for keyset in self.get_all_keysets():
@@ -639,10 +643,17 @@ class Dag(Manymany):
             if not counters[keyset]:
                 ready.append(keyset)
         
-        result = [ ]   
+        result = [ ]
         while ready:
-            item = ready.pop(0) #TODO: clever ordering: furthest before cursor, nearest after cursor
-            result.append(item)
+	    best = 0
+	    for i in xrange(1,len(ready)):
+		if keyset_priority[ready[i]] < keyset_priority[ready[best]]:
+		    best = i
+	
+            item = ready.pop(best) #TODO: clever ordering: furthest before cursor, nearest after cursor
+	                
+	    result.append(item)
+	    last_priority = keyset_priority[item]
             for keyset in self.forward[item]:
                 counters[keyset] -= 1
 		assert counters[keyset] >= 0
@@ -722,19 +733,20 @@ class Base_links(Table):
 
 class Browser:
     def __init__(self):
-	import curses
-	
         self.sequences = Sequences()
 	self.name_to_sequence = { }
 	self.alignments = Alignments()
 	self.base_links = Base_links()
+	
+    def open_screen(self):
+	import curses
 	
 	self.screen = curses.initscr()
 	curses.noecho()
 	curses.cbreak()
 	self.screen.keypad(1)
     
-    def close(self):
+    def close_screen(self):
         import curses
 	
 	self.screen.keypad(0)
@@ -780,6 +792,11 @@ class Browser:
             seq2 = self.name_to_sequence[name2]
 	except KeyError:
 	    raise Error('Sequence "%s" referenced by an alignment has not been loaded' % name2)
+
+        if not fwd1:
+	    start1 = len(self.sequences.sequence[seq1])-1-start1
+        if not fwd2:
+	    start2 = len(self.sequences.sequence[seq2])-1-start2
 	
 	location1 = make_location(seq1, fwd1, start1)
 	location2 = make_location(seq2, fwd2, start2)
@@ -787,17 +804,25 @@ class Browser:
 	ali = self.alignments.new_id()
 	self.alignments.type[ali] = type
 	
-	for i in xrange(len(ali1)):
-	    if ali1[i] != '-' and ali2[i] != '-':
-	        link = self.base_links.new_id()
-		self.base_links.location1[link] = location1
-		self.base_links.location2[link] = location2
-		self.base_links.alignment[link] = ali
-	    
-	    if ali1[i] != '-':
-	        location1 = location_next(location1)
-	    if ali2[i] != '-':
-	        location2 = location_next(location2)
+	#for i in xrange(len(ali1)):
+	i = 0
+	if len(ali1):
+	    while True:
+		if ali1[i] != '-' and ali2[i] != '-':
+	            link = self.base_links.new_id()
+		    self.base_links.location1[link] = location1
+		    self.base_links.location2[link] = location2
+		    self.base_links.alignment[link] = ali
+
+		if i == len(ali1)-1:
+	            break
+
+		if ali1[i] != '-':
+	            location1 = location_next(location1)
+		if ali2[i] != '-':
+	            location2 = location_next(location2)
+
+		i += 1
 	
 	self.alignments.you_are_dirty()
 	self.base_links.you_are_dirty()
@@ -819,33 +844,126 @@ class Browser:
 
 	    seq = self.sequences.sequence[self.name_to_sequence[name]]
 	    
-	    if forward:
-	        read_start = 0
-	    else:
-	        read_start = len(seq)-1
-	    
 	    self.add_alignment('myr align',
 	        ref_name, True, start, ref_ali,
-		name, forward, read_start, read_ali)
+		name, forward, 0, read_ali)
+		
+	    #if forward:
+	    #    read_start = 0
+	    #else:
+	    #    read_start = len(seq)-1
+	    
+	    #self.add_alignment('myr align',
+	    #    ref_name, True, start, ref_ali,
+	#	name, forward, read_start, read_ali)
+
+    def load_velvet_graph(self, filename):
+        f = open(filename, 'rb')
+        line = f.readline()
+	hash_size = int( line.split()[2] )	
+	tail_size = hash_size - 1
+	
+	while True:
+	    line = f.readline()
+	    if not line: break
+	    parts = line.strip().split()
+	    
+	    if parts[0] == 'NODE':
+	        node_name = 'NODE_' + parts[1]
+		fwd = sequence.sequence_from_string(f.readline().strip())
+		rev = sequence.sequence_from_string(f.readline().strip())
+		assert len(fwd) == len(rev)
+		if len(fwd) < tail_size:
+		    pad = [4]*(tail_size-len(fwd))
+		    fwd = numpy.concatenate((pad,fwd))
+		    rev = numpy.concatenate((pad,rev))
+		rev_rc = sequence.reverse_complement(rev)
+
+		#if not numpy.alltrue(numpy.equal(fwd[:-tail_size], rev_rc[tail_size:])):
+		#    print node_name
+                #    print fwd[:-tail_size]
+		#    print rev_rc[tail_size:]
+                #    print numpy.equal(fwd[:-tail_size],rev_rc[tail_size:]).astype('int')
+		#seq = numpy.concatenate((rev_rc,fwd[-tail_size:]))
+		
+		#self.add_sequence(node_name, seq)
+		#print node_name
+		
+		#TODO: IUPAC codes where different
+                inner_fwd = fwd[:-tail_size]
+		inner_rev = rev_rc[tail_size:]		
+		self.add_sequence(node_name, numpy.concatenate((
+		    rev_rc[:tail_size],
+		    numpy.where(numpy.equal(inner_fwd, inner_rev),
+		                inner_fwd,
+				4),
+		    fwd[-tail_size:]
+		)))
+		
+		#self.add_sequence(node_name+'_fwd', fwd)
+		#self.add_sequence(node_name+'_rev', rev)
+		#self.add_alignment('velvet_contig_pair',
+		#    node_name+'_fwd', True,  0,
+		#    sequence.string_from_sequence(fwd[:-tail_size]),
+		#    node_name+'_rev', False, len(rev_rc)-tail_size-1,
+		#    sequence.string_from_sequence(rev_rc[tail_size:]) )
+	
+	    if parts[0] == 'ARC':
+	        node_from = int(parts[1])
+		name_from = 'NODE_%d' % abs(node_from)
+		fwd_from = node_from >= 0
+
+	        node_to = int(parts[2])
+		name_to = 'NODE_%d' % abs(node_to)
+		fwd_to = node_to >= 0
+		
+		len_from = len(self.sequences.sequence[ self.name_to_sequence[name_from] ])
+		
+		self.add_alignment('velvet_arc',
+		     name_from, fwd_from, len_from-tail_size, 'X'*tail_size,
+		     name_to, fwd_to, 0, 'X'*tail_size)
+	    
+	        #node_from = int(parts[1])		
+		#if node_from < 0:
+		#    node_from = 'NODE_%s_rev' % -node_from
+		#else:
+		#    node_from = 'NODE_%s_fwd' % node_from
+                #node_from_id = self.name_to_sequence[node_from]		
+		
+		#node_to = -int(parts[2])
+		#if node_to < 0:
+		#    node_to = 'NODE_%s_rev' % -node_to
+		#else:
+		#    node_to = 'NODE_%s_fwd' % node_to
+                #node_to_id = self.name_to_sequence[node_to]
+		
+		#len_from = len(self.sequences.sequence[node_from_id])
+		#len_to = len(self.sequences.sequence[node_to_id])
+		#self.add_alignment('velvet_arc',
+		#    node_from, True,  len_from-tail_size, 'X'*tail_size,
+		#    node_to,   False, len_to-1, 'X'*tail_size)
+		
+		
+		
 
     def show(self, cursor, distance_cutoff):
-	done = sets.Set()
+	positions = { }
 	todo = [ ]
-	heapq.heappush(todo, (0, cursor))
-	def add_todo(location, distance):
+	heapq.heappush(todo, (0, 0, cursor))
+	def add_todo(location, distance, position):
 	    if distance > distance_cutoff:
 	        raise Out_of_bounds()
-	    if location in done: 
+	    if location in positions: 
 	        return
-	    heapq.heappush(todo, (distance, location))
+	    heapq.heappush(todo, (distance, position, location))
 	
 	dag = Dag()
 	contigua = Union()
 	
 	while todo:
-	    distance, location = heapq.heappop(todo)
-	    if location in done: continue
-	    done.add(location)
+	    distance, position, location = heapq.heappop(todo)
+	    if location in positions: continue
+	    positions[location] = position
 	    
 	    dag.get_keyset(location)
 	    
@@ -858,20 +976,20 @@ class Browser:
 	    try:
 	        linked_location = self.location_move(location,1)
 	        contigua.merge_if_created(location, linked_location)
-	        add_todo(linked_location, distance+1)
+	        add_todo(linked_location, distance+1, position+1)
 		dag.link_keys(location, linked_location)
 	    except Out_of_bounds: pass
 
 	    try:
 	        linked_location = self.location_move(location,-1)
 	        contigua.merge_if_created(location, linked_location)
-	        add_todo(linked_location, distance+1)
+	        add_todo(linked_location, distance+1, position-1)
 		dag.link_keys(linked_location, location)
 	    except Out_of_bounds: pass
 	    
 	    def merge(linked_location):
 	        try:
-		    add_todo(linked_location, distance+1)
+		    add_todo(linked_location, distance+1, position)
 		    dag.merge_keys(location, linked_location)
 		except Out_of_bounds: pass
 	    
@@ -911,7 +1029,7 @@ class Browser:
 	#    forward = (item & FORWARD_MASK) != 0
 	#    print self.sequences.name[seq], forward
 	
-	order = dag.sort()
+	order = dag.sort(positions)
 	
 	table = [ ]
 	column_width = [ ]
@@ -933,7 +1051,7 @@ class Browser:
 		#sequence.string_from_sequence( [ self.location_get(location)
 		#                          for location in relevant ] ) )
 	    
-	    column_width.append(max([ len(item) for item in column ]) + 1)
+	    column_width.append(max([ len(item) for item in column ]))
 
 
         self.screen.clear()
@@ -941,6 +1059,18 @@ class Browser:
 	maxy, maxx = self.screen.getmaxyx()
 	offset_y = maxy//2-cursor_y
 	offset_x = maxx//2-cursor_x
+	def addstr(y,x,string):
+	    if y < 0 or y >= maxy: return
+	    while string and x < 0:
+	        string = string[1:]
+		x += 1
+	    if x+len(string) > maxx:
+	        string = string[:maxx-x-len(string)]
+	    if not string: return
+	    try:
+	        self.screen.addstr(y,x,string)
+	    except:
+	        raise repr((y,x,string,maxy,maxx))
 	
         for y in xrange(len(contigs)):
 	    info = contigs[y].name
@@ -948,7 +1078,7 @@ class Browser:
 	        info += ' >>>'
 	    else:
 	        info += ' <<<'
-	    self.screen.addstr(y+offset_y,-len(info)-1+offset_x,info)
+	    addstr(y+offset_y,-len(info)-1+offset_x,info)
 	
 	    #item = iter(contigua[y]).next()
 	    #seq = location_sequence( item )
@@ -964,7 +1094,7 @@ class Browser:
 		string = sequence.string_from_sequence( [ self.location_get(location)
 		                                          for location in item ] )
 		
-		self.screen.addstr(y+offset_y,scr_x+offset_x,string)
+		addstr(y+offset_y,scr_x+offset_x,string)
 		
 		scr_x += column_width[x]
 		
@@ -975,22 +1105,27 @@ class Browser:
 	
 	return cursor_column, cursor_y
 	
-    def browse(self):
+    def browse(self, initial=None):
         import curses
     
         if self.sequences.length == 0:
 	    raise Error('No sequences to browse')
 
-        self.cursor = make_location(0,True,0)
+        if initial is not None:
+	    initial_id = self.name_to_sequence[initial]
+	else:
+	    initial_id = 0
+        self.cursor = make_location(initial_id,True,0)
 	
-        cursor_column, cursor_y = self.show(self.cursor, 20)
+	radius = 40
+        cursor_column, cursor_y = self.show(self.cursor, radius)
 	while True:
 	    self.screen.nodelay(1)
 	    key = self.screen.getch()
 	    self.screen.nodelay(0)
 	
 	    if key == -1:
-	        cursor_column, cursor_y = self.show(self.cursor, 20)
+	        cursor_column, cursor_y = self.show(self.cursor, radius)
 	        key = self.screen.getch()
 	    
 	    if key == curses.KEY_LEFT:
@@ -1015,6 +1150,20 @@ class Browser:
 		if cursor_y < len(cursor_column): self.cursor = cursor_column[cursor_y][0]		    
 	    elif key == 10:
 	        self.cursor = self.cursor ^ FORWARD_MASK
+	    elif key == curses.KEY_HOME:
+	        seq_id, fwd, pos = location_parts(self.cursor)
+		if fwd:
+		    pos = 0
+		else:
+		    pos = len(self.sequences.sequence[seq_id])-1
+		self.cursor = make_location(seq_id, fwd, pos)
+	    elif key == curses.KEY_END:
+	        seq_id, fwd, pos = location_parts(self.cursor)
+		if not fwd:
+		    pos = 0
+		else:
+		    pos = len(self.sequences.sequence[seq_id])-1
+		self.cursor = make_location(seq_id, fwd, pos)
 	    elif key == 27:
 	        break
 	    
@@ -1028,6 +1177,8 @@ BROWSE_USAGE = """\
 
 myr browse [sequence files] -aligns [alignment files]
 
+myr browse -velvet [velvet dir]/Graph
+
 """
 
 def browse(argv):
@@ -1036,22 +1187,28 @@ def browse(argv):
 	return 1
 
     browser = Browser()
-    try:
     
-        modes = ['-seqs', '-aligns']
-        mode = '-seqs'
-        for item in argv:
-            if item in modes:
-	        mode = item
-	    elif mode == '-seqs':
-	        browser.load_sequences(item)
-	    elif mode == '-aligns':
-		browser.load_myr_hits(item)
+    modes = ['-seqs', '-aligns', '-velvet','-initial']
+    mode = '-seqs'
+    initial = None
+    for item in argv:
+        if item in modes:
+	    mode = item
+	elif mode == '-seqs':
+	    browser.load_sequences(item)
+	elif mode == '-aligns':
+	    browser.load_myr_hits(item)
+	elif mode == '-velvet':
+	    browser.load_velvet_graph(item)
+	elif mode == '-initial':
+	    assert initial is None, 'More than one initial sequence name given'
+	    initial = item
 
-	browser.browse()
-    
+    browser.open_screen()
+    try:
+	browser.browse(initial)    
     finally:
-        browser.close()
+        browser.close_screen()
 
     return 0
 
