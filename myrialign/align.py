@@ -147,8 +147,8 @@ def align(seq1, seq2, n_errors, indel_cost):
     #scores[:,:] = n_errors+1
     #scores[0,:] = numpy.arange(len2+1)
     #scores[:,0] = numpy.arange(len1+1)
-    scores[0,:radius+1] = \
-    scores[:radius+1,0] = numpy.arange(radius+1) * indel_cost
+    scores[0,:radius+2] = \
+    scores[:radius+2,0] = numpy.arange(radius+2) * indel_cost
     
     #TODO: no need to allocate entire array
     
@@ -156,8 +156,10 @@ def align(seq1, seq2, n_errors, indel_cost):
         #for j in xrange(1,len2+1):
         left = max(1,i-radius)
         right = min(len2,i+radius)
-        scores[i,left-1] = n_errors+1
-        scores[i-1,right] = n_errors+1
+        if left > 1:
+            scores[i,left-1] = n_errors+1
+        if i > 1:
+            scores[i-1,right] = n_errors+1
         for j in xrange(left,right+1):            
             scores[i,j] = min(
                 scores[i-1,j-1] + sequence.NOTEQUAL[seq1[i-1],seq2[j-1]],
@@ -287,7 +289,7 @@ class Hit_eater:
         ref_start = ref_pos - (len(read)-1) - n_errors//self.indel_cost
         pad = -min(0,ref_start)
         ref_start = max(0,ref_start)        
-        ref_scrap = self.reference[ref_start:ref_pos+1]       
+        ref_scrap = self.reference[ref_start:ref_pos+1]
         
         # If before start, pad with Ns (not ideal)
         if pad:
