@@ -185,11 +185,10 @@ class Hits(Table):
 	('ref_ali', 'object'),
 	('start', 'int32'),
 	('end', 'int32'),
-	('n_errors', 'int32'),
     )   
 
 
-def iter_hit_file(filename):
+def iter_hit_file_myrialign(filename):
     ref_name = None
     nth = 0
     for line in open(filename, 'rb'):
@@ -202,7 +201,6 @@ def iter_hit_file(filename):
 	start, end = span.split('..')
 	start = int(start)-1
 	end = int(end)
-	n_errors = int(n_errors)	    
 	forward = (direction == 'fwd')
 	
 	nth += 1
@@ -210,15 +208,56 @@ def iter_hit_file(filename):
             sys.stderr.write('Loading hits: %d            \r' % nth)
 	    sys.stderr.flush()
 	
-	yield ref_name, name, forward, n_errors, start, end, read_ali, ref_ali
+	yield ref_name, name, forward, start, end, read_ali, ref_ali
+
+def iter_hit_file_maf(filename):
+    # BLAT only, for now
+    seqs = [ ]
+    f = open(filename,'rb')
+    nth = 0
+    while True:
+        line = f.readline()
 	
+	if line.startswith('s'):
+	    seqs.append(line.strip().split())
+	
+	if not line.strip() and seqs:
+	    assert len(seqs) == 2
+	    
+	    ref_s, ref_name, ref_start, ref_size, ref_strand, ref_src_size, ref_text = seqs[0]
+	    read_s, read_name, read_start, read_size, read_strand, read_src_size, read_text = seqs[1]
+	    seqs = [ ]
+	    
+	    assert ref_strand == '+'
+	    
+	    forward = read_strand=='+'
+	    start = int(ref_start)
+	    end = start + int(ref_size) - 1
+	    
+	    nth += 1
+	    if nth % 1000 == 0:
+        	sys.stderr.write('Loading hits: %d            \r' % nth)
+		sys.stderr.flush()
+
+	    yield ref_name, read_name, read_strand=='+', start, end, ref_text.upper(), read_text.upper()
+	    	
+	if not line: 
+	    break
+        
+
+
+def iter_hit_file(filename):
+    first_line = open(filename,'rb').readline()
+    if first_line.startswith('##maf'):
+        return iter_hit_file_maf(filename)
+    return iter_hit_file_myrialign(filename)
 
 def read_files(argv):
     clip_start, argv = get_option_value(argv, '-s', int, 0)
     clip_end, argv = get_option_value(argv, '-e', int, 0)
 
     if len(argv) < 2:
-        raise Bad_option('Expected at least two filenames, a reference genome and output from myr align')
+        raise Bad_option('Expected at least two filenames, a reference genome and and alignment file')
 
     reference = sequence.sequence_file_iterator(argv[0]).next()[1] 
 
@@ -232,7 +271,7 @@ def read_files(argv):
         #    if not line.endswith('\n'): continue
 	#    if line.startswith('#'): continue
 	
-	for ref_name, name, forward, n_errors, start, end, read_ali, ref_ali \
+	for ref_name, name, forward, start, end, read_ali, ref_ali \
 	        in iter_hit_file(filename):
 
 	    #hit = Hit()
@@ -248,7 +287,6 @@ def read_files(argv):
 	    
 	    hits.name[i] = name
 	    hits.forward[i] = forward
-	    hits.n_errors[i] = n_errors
 	    hits.start[i] = start
 	    hits.end[i] = end
 	    hits.read_ali[i] = read_ali
@@ -281,13 +319,18 @@ def read_files(argv):
 def artplot(argv):
     try:
         only_single, argv = get_option(argv, '-u')
+	prefix, argv = get_option_value(argv, '-p', lambda x:x, 'artplot')
         reference, hits = read_files(argv)
     except Bad_option, error:
         print >> sys.stderr, ''
-	print >> sys.stderr, 'myr artplot [options] <reference genome> <myr align output> [<myr align output>...]'
+	print >> sys.stderr, 'myr artplot [options] <reference genome> <alignments> [<alignments>...]'
+	print >> sys.stderr, ''
+	print >> sys.stderr, 'Alignments can be the output from "myr align" or the output'
+	print >> sys.stderr, 'of BLAT in "maf" format.'
 	print >> sys.stderr, ''
 	print >> sys.stderr, 'Options:'
 	print >> sys.stderr, ''
+        print >> sys.stderr, '    -p xx - Prefix for output files, default "artplot"'
 	show_default_options()
 	print >> sys.stderr, ''
 	print >> sys.stderr, error[0]
@@ -344,12 +387,10 @@ def artplot(argv):
             print >> f, i
 	f.close()
 
-    prefix = os.path.splitext(os.path.basename(argv[0]))[0] + '-'
-
-    save(prefix+'coverage.txt', coverage)
-    save(prefix+'insertions.txt', insertions)
-    save(prefix+'deletions.txt', deletions)
-    save(prefix+'substitutions.txt', substitutions)
+    save(prefix+'-coverage.txt', coverage)
+    save(prefix+'-insertions.txt', insertions)
+    save(prefix+'-deletions.txt', deletions)
+    save(prefix+'-substitutions.txt', substitutions)
     
     base_counts = base_counts[:,:4]
     base_total = numpy.sum(base_counts, 1)
@@ -360,7 +401,7 @@ def artplot(argv):
     entropy = numpy.zeros(size, 'float64')
     good = base_total > 0
     entropy[good] = numpy.sum(base_counts[good,:] * surprise[good,:], 1) / base_total[good]
-    save(prefix+'confusion.txt', entropy)
+    save(prefix+'-confusion.txt', entropy)
 
 
 def textdump(argv):
@@ -369,7 +410,10 @@ def textdump(argv):
         reference, hits = read_files(argv)
     except Bad_option, error:
         print >> sys.stderr, ''
-	print >> sys.stderr, 'myr textdump [options] <reference genome> <myr align output> [<myr align output>...]'
+	print >> sys.stderr, 'myr textdump [options] <reference genome> <alignments> [<alignments>...]'
+	print >> sys.stderr, ''
+	print >> sys.stderr, 'Alignments can be the output from "myr align" or the output'
+	print >> sys.stderr, 'of BLAT in "maf" format.'
 	print >> sys.stderr, ''
 	print >> sys.stderr, 'Options:'
 	print >> sys.stderr, ''
@@ -833,7 +877,7 @@ class Browser:
 	    self.add_sequence(name, seq)
 
     def load_myr_hits(self, filename):
-	for ref_name, name, forward, n_errors, start, end, read_ali, ref_ali \
+	for ref_name, name, forward, start, end, read_ali, ref_ali \
 	        in iter_hit_file(filename):
 
 	    if name not in self.name_to_sequence:
@@ -989,7 +1033,7 @@ class Browser:
 	    
 	    def merge(linked_location):
 	        try:
-		    add_todo(linked_location, distance+1, position)
+		    add_todo(linked_location, distance, position)
 		    dag.merge_keys(location, linked_location)
 		except Out_of_bounds: pass
 	    
@@ -1075,10 +1119,10 @@ class Browser:
         for y in xrange(len(contigs)):
 	    info = contigs[y].name
 	    if contigs[y].forward:
-	        info += ' >>>'
+	        info += ' >>> '
 	    else:
-	        info += ' <<<'
-	    addstr(y+offset_y,-len(info)-1+offset_x,info)
+	        info += ' <<< '
+	    addstr(y+offset_y,max(0,-len(info)-1+offset_x),info)
 	
 	    #item = iter(contigua[y]).next()
 	    #seq = location_sequence( item )
