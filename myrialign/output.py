@@ -15,7 +15,7 @@
 #    GNU General Public License for more details.
 #    
 #    You should have received a copy of the GNU General Public License
-#    along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+#    along with Myrialign.  If not, see <http://www.gnu.org/licenses/>.
 #
 
 """
@@ -26,7 +26,7 @@
 
 import sys, numpy, os.path, sets, heapq
 
-import sequence
+import sequence, sort
 
 class Error(Exception): pass
 class Bad_option(Error): pass
@@ -192,6 +192,8 @@ def iter_hit_file_myrialign(filename):
     ref_name = None
     nth = 0
     for line in open(filename, 'rb'):
+        if not line.endswith('\n'): break #Alignment file truncated or still being written
+    
         if line.startswith('#'):
             if line.startswith('#Reference:'):
 	        ref_name = line.split()[1]
@@ -218,6 +220,8 @@ def iter_hit_file_maf(filename):
     while True:
         line = f.readline()
 	
+        if not line.endswith('\n'): break #Alignment file truncated or still being written
+    
 	if line.startswith('s'):
 	    seqs.append(line.strip().split())
 	
@@ -1001,7 +1005,12 @@ class Browser:
 	        return
 	    heapq.heappush(todo, (distance, position, location))
 	
-	dag = Dag()
+	#dag = Dag()
+	dag = { }
+	def dag_link(a,b):
+	    if a not in dag: dag[a] = [ ]
+	    if b not in dag: dag[b] = [ ]
+	    dag[a].append(b)
 	contigua = Union()
 	
 	while todo:
@@ -1009,7 +1018,8 @@ class Browser:
 	    if location in positions: continue
 	    positions[location] = position
 	    
-	    dag.get_keyset(location)
+	    #dag.get_keyset(location)
+	    if location not in dag: dag[location] = [ ]
 	    
 	    contigua.create(location)
 	    
@@ -1021,20 +1031,21 @@ class Browser:
 	        linked_location = self.location_move(location,1)
 	        contigua.merge_if_created(location, linked_location)
 	        add_todo(linked_location, distance+1, position+1)
-		dag.link_keys(location, linked_location)
+		dag_link(location, linked_location)
 	    except Out_of_bounds: pass
 
 	    try:
 	        linked_location = self.location_move(location,-1)
 	        contigua.merge_if_created(location, linked_location)
 	        add_todo(linked_location, distance+1, position-1)
-		dag.link_keys(linked_location, location)
+		dag_link(linked_location, location)
 	    except Out_of_bounds: pass
 	    
 	    def merge(linked_location):
 	        try:
 		    add_todo(linked_location, distance, position)
-		    dag.merge_keys(location, linked_location)
+		    dag_link(location, linked_location)
+		    dag_link(linked_location, location)
 		except Out_of_bounds: pass
 	    
 	    for i in self.base_links.find_all('location1',location):
@@ -1073,7 +1084,10 @@ class Browser:
 	#    forward = (item & FORWARD_MASK) != 0
 	#    print self.sequences.name[seq], forward
 	
-	order = dag.sort(positions)
+	#order = dag.sort(positions)
+	def priority(component):
+	    return float(sum([ positions[item] for item in component ])) / len(component)
+	order = sort.robust_topological_sort(dag, priority)
 	
 	table = [ ]
 	column_width = [ ]
@@ -1221,7 +1235,7 @@ BROWSE_USAGE = """\
 
 myr browse [sequence files] -aligns [alignment files]
 
-myr browse -velvet [velvet dir]/Graph
+myr browse -velvet [velvet dir]/LastGraph
 
 """
 
