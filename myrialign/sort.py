@@ -18,7 +18,7 @@
 #    along with Myrialign.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import heapq
+import heapq, sets
 
 def strongly_connected_components(graph):
     result = [ ]
@@ -96,11 +96,35 @@ def robust_topological_sort(graph, priority=lambda x:x):
     return topological_sort(component_graph, priority)
 
 
+def compact_robust_topological_sort(graph, priority=lambda x:x):
+    order = robust_topological_sort(graph, priority)
+    
+    compacted = [ ]
+    next = sets.Set()
+    successors = sets.Set()
+    for component in order:
+        component = sets.Set(component)
+	if successors & component:
+	    compacted.append( tuple(next) )
+	    next = sets.Set()
+	    successors = sets.Set()
+    
+        next.union_update(component)
+        for node in component:
+	    for successor in graph[node]:
+	        successors.add(successor)
+    
+    if next:
+        compacted.append(tuple(next))
+    
+    return compacted
+
 if __name__ == '__main__':
-    print robust_topological_sort({
-        0 : [1],
+    print compact_robust_topological_sort({
+        0 : [1,3],
         1 : [2],
         2 : [1],
+	3 : [],
     })
 
 

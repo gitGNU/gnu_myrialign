@@ -391,10 +391,12 @@ def artplot(argv):
             print >> f, i
 	f.close()
 
+    normalizer = numpy.maximum(1.0, coverage)
+
     save(prefix+'-coverage.txt', coverage)
-    save(prefix+'-insertions.txt', insertions)
-    save(prefix+'-deletions.txt', deletions)
-    save(prefix+'-substitutions.txt', substitutions)
+    save(prefix+'-insertions.txt', insertions / normalizer)
+    save(prefix+'-deletions.txt', deletions / normalizer)
+    save(prefix+'-substitutions.txt', substitutions / normalizer)
     
     base_counts = base_counts[:,:4]
     base_total = numpy.sum(base_counts, 1)
@@ -593,122 +595,6 @@ class Manymany:
         self.back[b].remove(a)
         
 
-class Dag(Manymany):
-    def __init__(self):
-        Manymany.__init__(self)
-        self.key_keyset = Manymany()
-    
-    def has_key(self, key):
-        return key in self.key_keyset.forward
-    
-    def get_keyset(self, key):        
-        if key not in self.key_keyset.forward:
-            keyset = (key,)
-            self.key_keyset.create_forward(key)
-            self.key_keyset.create_back(keyset)
-            self.key_keyset.link(key, keyset)
-            self.create(keyset)
-        
-        return iter(self.key_keyset.forward[key]).next() #Should use a manyone, really
-	
-    def get_all_keysets(self):
-        return self.key_keyset.back.keys()
-    
-    def _find_betweeners(self, keyset, visited, betweeners):
-        if keyset in betweeners:
-            return True
-            
-        if keyset in visited:
-            return False
-                    
-        visited.add(keyset)
-        
-        any = False
-        
-        for next in self.forward[keyset]:
-            any = any or self._find_betweeners(next,visited,betweeners)
-        
-        if any:
-            betweeners.add(keyset)
-            
-        return any
-    
-    def link_keys(self, a, b):
-        a = self.get_keyset(a)
-        b = self.get_keyset(b)
-        
-        visited = sets.Set()
-        betweeners = sets.Set((a,))
-        if self._find_betweeners(b, visited, betweeners):
-            self.merge_keysets(betweeners)
-        else:
-            self.link(a,b)
-    
-    def merge_keys(self, a, b):
-        #a = self.get_keyset(a)
-        #b = self.get_keyset(b)
-	#if a != b:
-        #    self.merge_keysets((a,b))
-	
-	self.link_keys(a,b)
-	self.link_keys(b,a)
-        
-    def merge_keysets(self, keysets):
-        if len(keysets) <= 1:
-	    return
-	    
-        new_keyset = sum(keysets, ())
-        self.create(new_keyset)
-        self.key_keyset.create_back(new_keyset)
-        
-        for keyset in keysets:
-            for old_keyset in self.forward[keyset].copy():
-                self.unlink(keyset, old_keyset)
-                if old_keyset not in keysets:
-                    self.link(new_keyset, old_keyset)
-            for old_keyset in self.back[keyset].copy():
-                self.unlink(old_keyset, keyset)
-                if old_keyset not in keysets:
-                    self.link(old_keyset, new_keyset)
-
-            for key in keyset:
-                self.key_keyset.unlink(key, keyset)
-                self.key_keyset.link(key, new_keyset)
-            
-        for keyset in keysets:
-            self.key_keyset.destroy_back(keyset)  
-            self.destroy(keyset)
-
-    def sort(self, priority):
-        keyset_priority = { }
-	for keyset in self.get_all_keysets():
-	    keyset_priority[keyset] = float(sum([ priority[key] for key in keyset ])) / len(keyset)
-    
-        ready = [ ]
-        counters = { }
-        for keyset in self.get_all_keysets():
-            counters[keyset] = len(self.back[keyset])
-            if not counters[keyset]:
-                ready.append(keyset)
-        
-        result = [ ]
-        while ready:
-	    best = 0
-	    for i in xrange(1,len(ready)):
-		if keyset_priority[ready[i]] < keyset_priority[ready[best]]:
-		    best = i
-	
-            item = ready.pop(best) #TODO: clever ordering: furthest before cursor, nearest after cursor
-	                
-	    result.append(item)
-	    last_priority = keyset_priority[item]
-            for keyset in self.forward[item]:
-                counters[keyset] -= 1
-		assert counters[keyset] >= 0
-                if not counters[keyset]:
-                    ready.append(keyset)
-        return result
-
 class Union:
     def __init__(self):
         self.parent = { }
@@ -830,7 +716,7 @@ class Browser:
 
     def add_alignment(self, type, 
                       name1, fwd1, start1, ali1, 
-		      name2, fwd2, start2, ali2):
+		      name2, fwd2, start2, ali2, reverse_counts_from_end=True):
 	try:
             seq1 = self.name_to_sequence[name1]
 	except KeyError:
@@ -841,9 +727,9 @@ class Browser:
 	except KeyError:
 	    raise Error('Sequence "%s" referenced by an alignment has not been loaded' % name2)
 
-        if not fwd1:
+        if reverse_counts_from_end and not fwd1:
 	    start1 = len(self.sequences.sequence[seq1])-1-start1
-        if not fwd2:
+        if reverse_counts_from_end and not fwd2:
 	    start2 = len(self.sequences.sequence[seq2])-1-start2
 	
 	location1 = make_location(seq1, fwd1, start1)
@@ -904,6 +790,33 @@ class Browser:
 	    #self.add_alignment('myr align',
 	    #    ref_name, True, start, ref_ali,
 	#	name, forward, read_start, read_ali)
+
+    def load_maf(self, filename):
+	seqs = [ ]
+	f = open(filename,'rb')
+	nth = 0
+	while True:
+	    line = f.readline()
+
+	    if not line.endswith('\n'): break #Alignment file truncated or still being written
+
+	    if line.startswith('s'):
+		s, name, start, size, strand, src_size, text = line.strip().split()
+		forward = strand == '+'
+		start = int(start)
+		seqs.append((name, forward, start, text))
+
+	    if not line.strip() and seqs:
+	        for i in xrange(len(seqs)):
+		    for j in xrange(i):
+		        self.add_alignment('maf',
+			    seqs[i][0],seqs[i][1],seqs[i][2],seqs[i][3],
+			    seqs[j][0],seqs[j][1],seqs[j][2],seqs[j][3],
+			    True)
+		seqs = []
+		
+	    if not line: 
+		break
 
     def load_velvet_graph(self, filename):
         f = open(filename, 'rb')
@@ -1087,7 +1000,7 @@ class Browser:
 	#order = dag.sort(positions)
 	def priority(component):
 	    return float(sum([ positions[item] for item in component ])) / len(component)
-	order = sort.robust_topological_sort(dag, priority)
+	order = sort.compact_robust_topological_sort(dag, priority)
 	
 	table = [ ]
 	column_width = [ ]
@@ -1115,8 +1028,8 @@ class Browser:
         self.screen.clear()
 	
 	maxy, maxx = self.screen.getmaxyx()
-	offset_y = maxy//2-cursor_y
-	offset_x = maxx//2-cursor_x
+	offset_y = int( maxy//2-cursor_y )
+	offset_x = int( maxx//2-cursor_x )
 	def addstr(y,x,string):
 	    if y < 0 or y >= maxy: return
 	    while string and x < 0:
@@ -1131,12 +1044,6 @@ class Browser:
 	        raise repr((y,x,string,maxy,maxx))
 	
         for y in xrange(len(contigs)):
-	    info = contigs[y].name
-	    if contigs[y].forward:
-	        info += ' >>> '
-	    else:
-	        info += ' <<< '
-	    addstr(y+offset_y,max(0,-len(info)-1+offset_x),info)
 	
 	    #item = iter(contigua[y]).next()
 	    #seq = location_sequence( item )
@@ -1158,6 +1065,16 @@ class Browser:
 		
 	    #sys.stdout.write('\n')
 	    
+	    info = contigs[y].name
+	    if contigs[y].forward:
+	        info += ' >>> '
+	    else:
+	        info += ' <<< '
+	    addstr(y+offset_y,max(0,-len(info)-1+offset_x),info)
+	    
+	cursor_seq, cursor_fwd, cursor_pos = location_parts(cursor)
+	addstr(1,1, '%s @ %d' % (self.sequences.name[cursor_seq], cursor_pos))
+	    
 	self.screen.move(cursor_y+offset_y,cursor_x+offset_x)
 	self.screen.refresh()
 	
@@ -1175,7 +1092,7 @@ class Browser:
 	    initial_id = 0
         self.cursor = make_location(initial_id,True,0)
 	
-	radius = 40
+	radius = 60
         cursor_column, cursor_y = self.show(self.cursor, radius)
 	while True:
 	    self.screen.nodelay(1)
@@ -1246,7 +1163,7 @@ def browse(argv):
 
     browser = Browser()
     
-    modes = ['-seqs', '-aligns', '-velvet','-initial']
+    modes = ['-seqs', '-aligns', '-velvet','-maf','-initial']
     mode = '-seqs'
     initial = None
     for item in argv:
@@ -1258,6 +1175,8 @@ def browse(argv):
 	    browser.load_myr_hits(item)
 	elif mode == '-velvet':
 	    browser.load_velvet_graph(item)
+	elif mode == '-maf':
+	    browser.load_maf(item)
 	elif mode == '-initial':
 	    assert initial is None, 'More than one initial sequence name given'
 	    initial = item
