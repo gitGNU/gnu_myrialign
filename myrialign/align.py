@@ -252,9 +252,10 @@ def dominates(hit1, hit2):
     return hit1[2] == hit2[2] and abs(hit2[0]-hit1[0]) <= (hit2[3]-hit1[3])
 
 class Hit_eater:
-    def __init__(self, reference, indel_cost, callback):
+    def __init__(self, reference, max_error, indel_cost, callback):
         self.reference = reference
         self.callback = callback
+	self.max_error = max_error
         self.indel_cost = indel_cost
         
         self.hits = [ ] #(0=ref_pos,1=read,2=read_name,3=n_errors)
@@ -277,7 +278,7 @@ class Hit_eater:
         i = 0
         while i < len(self.hits):
             hit = self.hits[i]
-            if pos is None or hit[0]+hit[3] < pos:
+            if pos is None or hit[0]+self.max_error < pos:
                 self.handle_hit(*hit)
                 del self.hits[i]
             else:
@@ -322,7 +323,7 @@ def search_cpu(reference, reads, read_names, maxerror, indel_cost, callback):
     match_in = collapse(match_in)
     match_out = match_in.copy()
     
-    hit_eater = Hit_eater(reference, indel_cost, callback)
+    hit_eater = Hit_eater(reference, maxerror, indel_cost, callback)
     
     for ref_pos, nuc in enumerate(reference):
         observe(match_in,match_out, nucmatch[nuc], indel_cost)
@@ -375,7 +376,7 @@ def search_spu(reference, reads, read_names, maxerror, indel_cost, callback):
     child.write(reference.tostring())
     child.close_stdin()
     
-    hit_eater = Hit_eater(reference, indel_cost, callback)
+    hit_eater = Hit_eater(reference, maxerror, indel_cost, callback)
     
     while True:
         children.wait([child])
@@ -442,7 +443,7 @@ def main(argv):
         print >> sys.stderr, ''
         print >> sys.stderr, 'For Illumina reads, we suggest (on the basis of very little experience):'
         print >> sys.stderr, ''
-        print >> sys.stderr, '    myr align 5 2 reference.fna reads.fna'
+        print >> sys.stderr, '    myr align 6 2 reference.fna reads.fna'
         print >> sys.stderr, ''
         return 1
 

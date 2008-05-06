@@ -1,9 +1,13 @@
 
-import sha, os, shutil, fcntl
+import sha, os, shutil, fcntl, sys
 
 # TODO: spu should use this mechanism
 
 cache_dir = os.path.join(os.environ['HOME'],'.myrcache')
+
+def file_signature(filename):
+    filename = os.path.abspath(filename)
+    return (filename, os.path.getmtime(filename))
 
 def get(ident, callback):
     """
@@ -22,7 +26,9 @@ def get(ident, callback):
     hasher.update(repr(ident))
     root = os.path.join(cache_dir, hasher.hexdigest())
     
-    print root
+    print >> sys.stderr, 'Cached job'
+    print >> sys.stderr, ident
+    print >> sys.stderr, root
     
     working_dir = root + '-working'
     lock_filename = root + '-lock'

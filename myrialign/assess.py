@@ -3,42 +3,50 @@ import random, os, sys
 
 import cache, sequence, align
 
-#TODO: should look at datestamp on filenames
+def sample(read_files, n_samples):
+    read_filesigs = [ cache.file_signature(filename) for filename in read_files ]
+    read_files = [ item[0] for item in read_filesigs ]
 
-def sample(working_dir, read_files, n_samples):
-    print >> sys.stderr, 'Sampling'
-    samples = [ ]
-    
-    n = 0
-    for item in sequence.sequence_files_iterator(read_files):
-        n += 1
-        if len(samples) < n_samples:
-	    samples.append(item)
-	elif random.random()*n_samples < n:
-	    samples[random.randrange(n_samples)] = item
-    
-    outfile = open(os.path.join(working_dir,'sample.fna'),'wb')
-    for item in samples:
-        print >> outfile, '>%s' % item[0]
-	print >> outfile, '%s' % sequence.string_from_sequence(item[1])
-    
-sample = cache.cached(sample)
+    def callback(working_dir):    
+        print >> sys.stderr, 'Sampling'    
+	samples = [ ]
+	n = 0
+	for item in sequence.sequence_files_iterator(read_files):
+            n += 1
+            if len(samples) < n_samples:
+		samples.append(item)
+	    elif random.random()*n_samples < n:
+		samples[random.randrange(n_samples)] = item
 
+	outfile = open(os.path.join(working_dir,'sample.fna'),'wb')
+	for item in samples:
+            print >> outfile, '>%s' % item[0]
+	    print >> outfile, '%s' % sequence.string_from_sequence(item[1])
+	    
+    result_dir = cache.get(('assess','sample',n_samples,read_filesigs), callback)
+    return os.path.join(result_dir, 'sample.fna')
 
-def invoke_align(working_dir, reference_filename, read_filename):
-    print >> sys.stderr, 'Aligning'
-    #Hmm
-    old_stdout = sys.stdout
-    sys.stdout = open(os.path.join(working_dir,'hits.myr'), 'wb')
+def invoke_align(reference_filename, read_filename):
+    reference_filesig = cache.file_signature(reference_filename)
+    reference_filename = reference_filesig[0]
+    read_filesig = cache.file_signature(read_filename)
+    read_filename = read_filesig[0]
 
-    try:
-        assert align.main(['5','1',reference_filename,read_filename]) == 0
-    finally:
-        sys.stdout.close()
-        sys.stdout = old_stdout
+    def callback(working_dir):
+	print >> sys.stderr, 'Aligning'
+	#Hmm
+	old_stdout = sys.stdout
+	sys.stdout = open(os.path.join(working_dir,'hits.myr'), 'wb')
 
-invoke_align = cache.cached(invoke_align)
+	try:
+	    assert align.main(['6','2',reference_filename,read_filename]) == 0
+	finally:
+	    sys.stdout.close()
+	    sys.stdout = old_stdout
 
+    return os.path.join(
+        cache.get(('assess','invoke_align1',reference_filesig,read_filesig),callback), 
+        'hits.myr')
 
 def main(argv):
     if len(argv) < 2:
@@ -47,13 +55,11 @@ def main(argv):
 	print >> sys.stderr, ''
 	return 1
     
-    sample_dir = sample(argv[1:], 100)    
-    sample_file = os.path.join(sample_dir, 'sample.fna')
+    sample_file = sample(argv[1:], 1000)    
 
-    hit_dir = invoke_align(argv[0], sample_file)
-    hit_file = os.path.join(hit_dir, 'hits.myr')
+    hit_file = invoke_align(argv[0], sample_file)
 
-    hits = [ ]
+    hits = { }
     for item in sequence.sequence_file_iterator(sample_file):
         hits[item[0]] = [ ]
 
@@ -66,7 +72,7 @@ def main(argv):
     
     n_ambiguous = 0
     n_unhit = 0
-    error_count = [ 0 ] * 6 #TODO: make max errors an option
+    error_count = [ 0 ] * 7 #TODO: make max errors an option
     for name in hits:
         if not hits[name]:
 	    n_unhit += 1
