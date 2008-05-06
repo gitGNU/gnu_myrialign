@@ -35,8 +35,11 @@ Commands:
     textdump - generate text file comparing reads to reference
 
     artplot  - generate userplot files for Artemis
+
  
     shred    - generate simulated Illumina reads
+
+    assess   - estimate read accuracy
 
 
 Enter just "myr [command]" for help on that command.
@@ -73,7 +76,11 @@ def main(argv):
     
     elif command == 'shred':
         import shred
-        shred.main(argv)
+        return shred.main(argv)
+
+    elif command == 'assess':
+        import assess
+        return assess.main(argv)
 	
     else:    
         return show_help()

@@ -649,6 +649,7 @@ class Sequences(Table):
     MEMBERS = (
         ('name', 'object'),
 	('sequence', 'object'),
+	('comment', 'object'),
     )
 
 class Alignments(Table):
@@ -705,11 +706,16 @@ class Browser:
 	    return result
 	else:
 	    return sequence.COMPLEMENT[result]
+
+    def valid_location(self, location):
+        seq, forward, pos = location_parts(location)
+	return pos < len(self.sequences.sequence[seq])
 	
-    def add_sequence(self, name, sequence):
+    def add_sequence(self, name, sequence, comment=''):
         i = self.sequences.new_id()
 	self.sequences.name[i] = name
 	self.sequences.sequence[i] = sequence
+	self.sequences.comment[i] = comment
 	self.sequences.you_are_dirty()
 	self.name_to_sequence[name] = i
 	return i
@@ -738,12 +744,15 @@ class Browser:
 	ali = self.alignments.new_id()
 	self.alignments.type[ali] = type
 	
-	#for i in xrange(len(ali1)):
+        assert len(ali1) == len(ali2)
+
 	i = 0
 	if len(ali1):
 	    while True:
 		if ali1[i] != '-' and ali2[i] != '-':
 	            link = self.base_links.new_id()
+		    assert self.valid_location(location1), 'Bad alignment %d <%s>-%s' % (i,name1,name2)
+		    assert self.valid_location(location2), 'Bad alignment %d %s-<%s>' % (i,name1,name2)
 		    self.base_links.location1[link] = location1
 		    self.base_links.location2[link] = location2
 		    self.base_links.alignment[link] = ali
@@ -819,7 +828,14 @@ class Browser:
 		break
 
     def load_velvet_graph(self, filename):
-        f = open(filename, 'rb')
+        comments = { }
+        f = open(os.path.join(filename,'stats.txt'), 'rb')
+	f.readline()
+	for line in f:
+	    ID, lgth, n_out, n_in, long_cov, short1_cov, short1_Ocov, short2_cov, short2_Ocov = line.strip().split()
+	    comments['NODE_'+ID] = 'cov=%.1f' % (float(long_cov)+float(short1_cov)+float(short2_cov))
+	
+        f = open(os.path.join(filename,'LastGraph'), 'rb')
         line = f.readline()
 	hash_size = int( line.split()[2] )	
 	tail_size = hash_size - 1
@@ -853,13 +869,16 @@ class Browser:
 		#TODO: IUPAC codes where different
                 inner_fwd = fwd[:-tail_size]
 		inner_rev = rev_rc[tail_size:]		
-		self.add_sequence(node_name, numpy.concatenate((
+		self.add_sequence(
+		  node_name, 
+		  numpy.concatenate((
 		    rev_rc[:tail_size],
 		    numpy.where(numpy.equal(inner_fwd, inner_rev),
 		                inner_fwd,
 				4),
 		    fwd[-tail_size:]
-		)))
+		  )),
+		  comments[node_name])
 		
 		#self.add_sequence(node_name+'_fwd', fwd)
 		#self.add_sequence(node_name+'_rev', rev)
@@ -916,6 +935,7 @@ class Browser:
 	        raise Out_of_bounds()
 	    if location in positions: 
 	        return
+	    assert self.valid_location(location)
 	    heapq.heappush(todo, (distance, position, location))
 	
 	#dag = Dag()
@@ -1036,12 +1056,12 @@ class Browser:
 	        string = string[1:]
 		x += 1
 	    if x+len(string) > maxx:
-	        string = string[:maxx-x-len(string)]
+	        string = string[:max(0,maxx-x)]
 	    if not string: return
-	    try:
-	        self.screen.addstr(y,x,string)
-	    except:
-	        raise repr((y,x,string,maxy,maxx))
+	    #try:
+	    self.screen.addstr(y,x,string)
+	    #except:
+	    #    raise repr((y,x,string,maxy,maxx))
 	
         for y in xrange(len(contigs)):
 	
@@ -1066,6 +1086,8 @@ class Browser:
 	    #sys.stdout.write('\n')
 	    
 	    info = contigs[y].name
+	    if self.sequences.comment[contigs[y].seq]:
+	        info += ' ' + self.sequences.comment[contigs[y].seq]
 	    if contigs[y].forward:
 	        info += ' >>> '
 	    else:
@@ -1152,7 +1174,7 @@ BROWSE_USAGE = """\
 
 myr browse [sequence files] -aligns [alignment files]
 
-myr browse -velvet [velvet dir]/LastGraph
+myr browse -velvet [velvet dir]
 
 """
 
