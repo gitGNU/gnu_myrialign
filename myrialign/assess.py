@@ -26,7 +26,7 @@ def sample(read_files, n_samples):
     result_dir = cache.get(('assess','sample',n_samples,read_filesigs), callback)
     return os.path.join(result_dir, 'sample.fna')
 
-def invoke_align(reference_filename, read_filename):
+def invoke_align(reference_filename, read_filename, max_errors):
     reference_filesig = cache.file_signature(reference_filename)
     reference_filename = reference_filesig[0]
     read_filesig = cache.file_signature(read_filename)
@@ -39,13 +39,13 @@ def invoke_align(reference_filename, read_filename):
 	sys.stdout = open(os.path.join(working_dir,'hits.myr'), 'wb')
 
 	try:
-	    assert align.main(['6','2',reference_filename,read_filename]) == 0
+	    assert align.main([str(max_errors),'1',reference_filename,read_filename]) == 0
 	finally:
 	    sys.stdout.close()
 	    sys.stdout = old_stdout
 
     return os.path.join(
-        cache.get(('assess','invoke_align1',reference_filesig,read_filesig),callback), 
+        cache.get(('assess','invoke_align1',reference_filesig,read_filesig,max_errors),callback), 
         'hits.myr')
 
 def main(argv):
@@ -54,10 +54,12 @@ def main(argv):
 	print >> sys.stderr, 'myr assess <contigs file> <reads> [<reads> ...]'
 	print >> sys.stderr, ''
 	return 1
+
+    max_errors = 3
     
     sample_file = sample(argv[1:], 1000)    
 
-    hit_file = invoke_align(argv[0], sample_file)
+    hit_file = invoke_align(argv[0], sample_file, max_errors)
 
     hits = { }
     for item in sequence.sequence_file_iterator(sample_file):
@@ -72,7 +74,7 @@ def main(argv):
     
     n_ambiguous = 0
     n_unhit = 0
-    error_count = [ 0 ] * 7 #TODO: make max errors an option
+    error_count = [ 0 ] * (max_errors+1)
     for name in hits:
         if not hits[name]:
 	    n_unhit += 1

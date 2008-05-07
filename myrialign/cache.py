@@ -1,6 +1,8 @@
 
 import sha, os, shutil, fcntl, sys
 
+import util
+
 # TODO: spu should use this mechanism
 
 cache_dir = os.path.join(os.environ['HOME'],'.myrcache')
@@ -26,9 +28,8 @@ def get(ident, callback):
     hasher.update(repr(ident))
     root = os.path.join(cache_dir, hasher.hexdigest())
     
-    print >> sys.stderr, 'Cached job'
-    print >> sys.stderr, ident
-    print >> sys.stderr, root
+    util.show_message('Cache %s' % repr(ident))
+    util.show_message('Cache root is %s' % root)
     
     working_dir = root + '-working'
     lock_filename = root + '-lock'

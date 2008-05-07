@@ -29,7 +29,7 @@
 
 import numpy, random, time, sys, os, string, select, struct, fcntl
 
-import spu, children, sequence
+import spu, children, sequence, util
 
 def how_many_cpus():
     """Detects the number of effective CPUs in the system,
@@ -474,7 +474,7 @@ def main(argv):
                 
                 dt = time.time() - t1
                 total_alignments[0] += value//2 # Forwards + backwards == 1 alignment
-                print >> sys.stderr, '%d alignments in %.2f seconds, %.4f per alignment' % (total_alignments[0], dt, dt/total_alignments[0])
+                util.show_status('%d alignments in %.2f seconds, %.4f per alignment' % (total_alignments[0], dt, dt/total_alignments[0]))
             else:
                 print value
     
@@ -513,7 +513,7 @@ def main(argv):
             while not waiting: 
                 handle_events()
         
-            print >> sys.stderr, 'Starting batch alignment of', len(read_seqs), '%d-mers'%length
+            #print >> sys.stderr, 'Starting batch alignment of', len(read_seqs), '%d-mers'%length
         
             child = waiting.pop()
             child.send(('align', (read_seqs, read_names, maxerror, indel_cost)))
@@ -539,6 +539,8 @@ def main(argv):
     
     for child in waiting:
         child.close()
+
+    util.show_status('')
     
     return 0
 
