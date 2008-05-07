@@ -58,9 +58,9 @@ def main(argv):
     sample_size = int(argv[0])
     max_errors = int(argv[1])
     
-    sample_file = sample(argv[2:], sample_size)    
+    sample_file = sample(argv[3:], sample_size)    
 
-    hit_file = invoke_align(argv[1], sample_file, max_errors)
+    hit_file = invoke_align(argv[2], sample_file, max_errors)
 
     hits = { }
     for item in sequence.sequence_file_iterator(sample_file):
