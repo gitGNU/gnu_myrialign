@@ -29,6 +29,8 @@
 
 import sys, os, os.path, sha, fcntl
 
+import util
+
 cache_dir = os.path.join(os.environ['HOME'],'.spucache')
 lock_filename = os.path.join(cache_dir, 'lock') 
 
@@ -60,7 +62,7 @@ def get(code):
         f.close()
         
         #Hmmm
-        print >> sys.stderr, 'Compiling helper'
+        util.show_status('Compiling helper')
         assert os.system(compile_command % locals()) == 0
         assert os.system('mv %(out_filename)s %(filename)s' % locals()) == 0
         return filename
