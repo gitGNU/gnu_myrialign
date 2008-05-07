@@ -51,15 +51,16 @@ def invoke_align(reference_filename, read_filename, max_errors):
 def main(argv):
     if len(argv) < 2:
         print >> sys.stderr, ''
-	print >> sys.stderr, 'myr assess <contigs file> <reads> [<reads> ...]'
+	print >> sys.stderr, 'myr assess <sample size> <max errors> <contigs file> <reads> [<reads> ...]'
 	print >> sys.stderr, ''
 	return 1
 
-    max_errors = 3
+    sample_size = int(argv[0])
+    max_errors = int(argv[1])
     
-    sample_file = sample(argv[1:], 1000)    
+    sample_file = sample(argv[2:], sample_size)    
 
-    hit_file = invoke_align(argv[0], sample_file, max_errors)
+    hit_file = invoke_align(argv[1], sample_file, max_errors)
 
     hits = { }
     for item in sequence.sequence_file_iterator(sample_file):
