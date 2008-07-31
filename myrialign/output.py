@@ -247,14 +247,50 @@ def iter_hit_file_maf(filename):
 	    	
 	if not line: 
 	    break
-        
+
+def iter_hit_file_eland(filename):        
+    nth = 0
+    for line in open(filename, 'rb'):
+        if not line.endswith('\n'): break #Alignment file truncated or still being written
+	
+	parts = line.rstrip().split('\t')
+	
+	if len(parts) < 10: continue #No unique best hit
+	
+	read_name, read_seq, match_type, n_U0, n_U1, n_U2, ref_filename, ref_position, direction, \
+	how_Ns_interpreted = parts[:10]
+	substitutions = parts[10:]
+	
+	forward = (direction == 'F')
+	start = int(ref_position)-1
+	end = start+len(read_seq)
+	
+	ref_seq = read_seq
+	for item in substitutions:
+	    base = item[-1]
+	    position = int(item[:-1])-1
+	    ref_seq = ref_seq[:position] + base + ref_seq[position+1:]
+
+        if not forward:
+            read_seq = sequence.reverse_complement_string(read_seq)
+	    ref_seq = sequence.reverse_complement_string(ref_seq)
+
+	nth += 1
+	if nth % 1000 == 0:
+            sys.stderr.write('Loading hits: %d            \r' % nth)
+	    sys.stderr.flush()
+	
+	yield ref_filename, read_name, forward, start, end, ref_seq.upper(), read_seq.upper()
 
 
 def iter_hit_file(filename):
     first_line = open(filename,'rb').readline()
     if first_line.startswith('##maf'):
         return iter_hit_file_maf(filename)
+    if first_line.startswith('>'):
+        return iter_hit_file_eland(filename)
     return iter_hit_file_myrialign(filename)
+
 
 def read_files(argv):
     clip_start, argv = get_option_value(argv, '-s', int, 0)
@@ -329,8 +365,8 @@ def artplot(argv):
         print >> sys.stderr, ''
 	print >> sys.stderr, 'myr artplot [options] <reference genome> <alignments> [<alignments>...]'
 	print >> sys.stderr, ''
-	print >> sys.stderr, 'Alignments can be the output from "myr align" or the output'
-	print >> sys.stderr, 'of BLAT in "maf" format.'
+	print >> sys.stderr, 'Alignments can be the output from "myr align", the output'
+	print >> sys.stderr, 'of BLAT in "maf" format, or an ELAND results file.'
 	print >> sys.stderr, ''
 	print >> sys.stderr, 'Options:'
 	print >> sys.stderr, ''
@@ -363,18 +399,22 @@ def artplot(argv):
 		a = read_ali[j]
 		b = ref_ali[j]
 
+                in_bounds = (0 <= pos < size)
         	if a == '-':
-		    deletions[pos] += weight
-		    coverage[pos] += weight
+		    if in_bounds:
+		        deletions[pos] += weight
+		        coverage[pos] += weight
 		    pos += 1
 		elif b == '-':
-		    insertions[pos] += weight
+		    if in_bounds:
+		        insertions[pos] += weight
 		else:
-		    if a != b:
-	                substitutions[pos] += weight
+		    if in_bounds:
+		        if a != b:
+	                    substitutions[pos] += weight
 
-	            coverage[pos] += weight
-		    base_counts[pos, base_map[a]] += weight
+	                coverage[pos] += weight
+		        base_counts[pos, base_map[a]] += weight
 		    pos += 1
 
 	    nth += 1
@@ -418,8 +458,8 @@ def textdump(argv):
         print >> sys.stderr, ''
 	print >> sys.stderr, 'myr textdump [options] <reference genome> <alignments> [<alignments>...]'
 	print >> sys.stderr, ''
-	print >> sys.stderr, 'Alignments can be the output from "myr align" or the output'
-	print >> sys.stderr, 'of BLAT in "maf" format.'
+	print >> sys.stderr, 'Alignments can be the output from "myr align", the output'
+	print >> sys.stderr, 'of BLAT in "maf" format, or an ELAND results file.'
 	print >> sys.stderr, ''
 	print >> sys.stderr, 'Options:'
 	print >> sys.stderr, ''

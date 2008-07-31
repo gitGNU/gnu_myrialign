@@ -56,6 +56,9 @@ def string_from_sequence(seq):
 def reverse_complement(seq):
     return COMPLEMENT[ seq[::-1] ] 
 
+def reverse_complement_string(string):
+    return string_from_sequence(reverse_complement(sequence_from_string(string)))
+
 
 def fasta_iterator(filename):
     cur_seq_name = None    

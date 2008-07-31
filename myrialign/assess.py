@@ -63,30 +63,61 @@ def main(argv):
     hit_file = invoke_align(argv[2], sample_file, max_errors)
 
     hits = { }
+    seqs = { }
+    max_length = 0
     for item in sequence.sequence_file_iterator(sample_file):
+        seqs[item[0]] = item[1]
         hits[item[0]] = [ ]
+	max_length = max(len(item[1]),max_length)
 
     for line in open(hit_file, 'rb'):
         line = line.strip()
 	if line.startswith('#'): continue
 
 	name, direction, n_errors, span, read_ali, ref_ali = line.rstrip().split()
-        hits[name].append(int(n_errors))
+        hits[name].append((int(n_errors), direction=='fwd', read_ali, ref_ali))
     
     n_ambiguous = 0
     n_unhit = 0
     error_count = [ 0 ] * (max_errors+1)
+    error_pos_count = [ 0 ] * max_length
+    indel_pos_count = [ 0 ] * max_length
     for name in hits:
+        hits[name].sort()
         if not hits[name]:
 	    n_unhit += 1
-	elif len(hits[name]) > 1:
+	    continue
+	
+	if len(hits[name]) > 1 and \
+	   hits[name][0][0]+2 > hits[name][1][0]:
 	    n_ambiguous += 1
-	else:
-	    error_count[hits[name][0]] += 1
+	    continue
+
+	error_count[hits[name][0][0]] += 1
+
+	forward, read_ali, ref_ali = hits[name][0][1:]
+	if not forward:
+	    read_ali = read_ali[::-1]
+	    ref_ali = ref_ali[::-1]
+	    # Don't worry about complementing...
+	read_pos = 0
+	for i in xrange(len(read_ali)):
+	    if read_ali[i] == '-' or ref_ali[i] == '-':
+		indel_pos_count[read_pos] += 1
+	    elif read_ali[i] != ref_ali[i]:
+		error_pos_count[read_pos] += 1
+
+	    if read_ali[i] != '-':
+		read_pos += 1
+
+    print 'Error profile'
+    for i in xrange(max_length):
+        print 'pos=%5d snps=%5d indels=%5d' % (i+1,error_pos_count[i],indel_pos_count[i])
+    print
     
     print 'Sampled', len(hits), 'reads'
-    print n_ambiguous, 'hit multiple contigs'
+    print n_ambiguous, 'had no clear best hit'
     print n_unhit, 'hit nothing'
-    for i in xrange(len(error_count)):
+    for i in xrange(max_errors+1 -2):
         print '%3d errors: %d' % (i,error_count[i])
 
